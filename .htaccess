@@ -1,0 +1,79 @@
+# ====================================================================
+#  Panel zespołu — konfiguracja Apache / LiteSpeed
+#  Plik działa na typowym hostingu współdzielonym z AllowOverride All.
+# ====================================================================
+
+AddDefaultCharset UTF-8
+DirectoryIndex index.php
+
+# Bez listowania zawartości katalogów
+Options -Indexes
+
+# ---------------------------------------------------------------
+#  1. Baza danych i załączniki poza zasięgiem przeglądarki
+# ---------------------------------------------------------------
+# Katalogi data/ i uploads/ mają własne pliki .htaccess, ale gdyby
+# serwer ich nie odczytał, blokada działa również stąd.
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteRule ^(data|uploads)/ - [F,L]
+</IfModule>
+
+# Pliki, których nikt nie powinien pobrać bezpośrednio:
+# db.php (dołączany przez inne skrypty), baza SQLite, logi, konfiguracja.
+<FilesMatch "(^\.|^db\.php$|^\.user\.ini$|\.(sqlite|sqlite3|db|log|ini|md|bak|sql)$)">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order allow,deny
+        Deny from all
+    </IfModule>
+</FilesMatch>
+
+# ---------------------------------------------------------------
+#  2. Limity wysyłki plików (15 MB + zapas na narzut multipart)
+# ---------------------------------------------------------------
+# Działa tylko przy mod_php. Przy PHP-FPM / CGI / LiteSpeed te same
+# wartości ustawia plik .user.ini leżący obok tego pliku.
+<IfModule mod_php7.c>
+    php_value upload_max_filesize 16M
+    php_value post_max_size 20M
+    php_value max_execution_time 120
+    php_value max_input_time 120
+</IfModule>
+<IfModule mod_php.c>
+    php_value upload_max_filesize 16M
+    php_value post_max_size 20M
+    php_value max_execution_time 120
+    php_value max_input_time 120
+</IfModule>
+
+# ---------------------------------------------------------------
+#  3. Nagłówki bezpieczeństwa
+# ---------------------------------------------------------------
+<IfModule mod_headers.c>
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set X-Frame-Options "SAMEORIGIN"
+    Header always set Referrer-Policy "same-origin"
+    Header always set Permissions-Policy "geolocation=(), microphone=(), camera=()"
+</IfModule>
+
+# ---------------------------------------------------------------
+#  4. Kompresja i cache (wyłącznie dla zasobów statycznych)
+# ---------------------------------------------------------------
+<IfModule mod_deflate.c>
+    AddOutputFilterByType DEFLATE text/html text/plain text/css text/javascript application/javascript application/json
+</IfModule>
+
+<IfModule mod_expires.c>
+    ExpiresActive On
+    ExpiresByType image/png  "access plus 7 days"
+    ExpiresByType image/jpeg "access plus 7 days"
+    ExpiresByType image/svg+xml "access plus 7 days"
+</IfModule>
+
+# ---------------------------------------------------------------
+#  5. Strony błędów kierujemy do panelu
+# ---------------------------------------------------------------
+ErrorDocument 403 "Brak dostepu."

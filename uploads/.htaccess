@@ -1,0 +1,22 @@
+# Załączniki są wydawane wyłącznie przez api.php?action=download
+# (po sprawdzeniu, czy użytkownik jest zalogowany).
+# Bezpośrednie wejście na ten katalog z przeglądarki jest zablokowane.
+
+<IfModule mod_authz_core.c>
+    Require all denied
+</IfModule>
+<IfModule !mod_authz_core.c>
+    Order allow,deny
+    Deny from all
+</IfModule>
+
+# Gdyby serwer zignorował powyższe — nic tutaj nie może się wykonać.
+<IfModule mod_php7.c>
+    php_flag engine off
+</IfModule>
+<IfModule mod_php.c>
+    php_flag engine off
+</IfModule>
+RemoveHandler .php .phtml .php3 .php4 .php5 .php7 .php8 .phar .cgi .pl .py
+RemoveType .php .phtml .php3 .php4 .php5 .php7 .php8 .phar
+Options -ExecCGI -Indexes
