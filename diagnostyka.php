@@ -228,6 +228,12 @@ function testWysylki(): array
 
     $kroki[] = ['file_uploads włączone w PHP', (bool)ini_get('file_uploads'), ini_get('file_uploads') ? 'tak' : 'NIE'];
 
+    /* Gdy to jest wyłączone, PHP nigdy nie wypełni $_POST ani $_FILES —
+       zostaje wyłącznie odczyt php://input. */
+    $czytanie = (bool)ini_get('enable_post_data_reading');
+    $kroki[] = ['enable_post_data_reading', true,
+        $czytanie ? 'on — PHP samo rozbiera formularze' : 'OFF — $_POST i $_FILES zawsze puste, panel czyta treść sam'];
+
     $open = (string)ini_get('open_basedir');
     $kroki[] = ['open_basedir nie blokuje katalogu',
         $open === '' || strpos($open, __DIR__) !== false || strpos(__DIR__, explode(PATH_SEPARATOR, $open)[0]) === 0,
@@ -405,14 +411,14 @@ header('Content-Type: text/html; charset=utf-8');
         <?php endforeach; ?>
     </table>
 
-    <h3>Transport wysyłki — która metoda dociera do serwera</h3>
+    <h3>Transport wysyłki — co dociera do serwera</h3>
     <table id="transport">
-        <tr><td class="i">…</td><td class="n">Trwa test trzech metod</td><td class="w">chwila…</td></tr>
+        <tr><td class="i">…</td><td class="n">Trwa test kilku metod i rozmiarów</td><td class="w">to potrwa kilkanaście sekund…</td></tr>
     </table>
     <p style="margin:10px 2px 0;font-size:13px;color:#64748b">
-        Panel próbuje kolejno: strumień, base64, formularz. Wystarczy, że
-        <strong>choć jedna</strong> metoda pokaże liczbę bajtów zgodną z wysłaną —
-        wysyłanie plików będzie działać.
+        Sprawdzamy każdą metodę na rosnących porcjach danych, bo część serwerów
+        przepuszcza małe żądania, a obcina duże. Panel wysyła pliki tą metodą,
+        która działa — a w ostateczności dzieli plik na drobne fragmenty.
     </p>
 
     <h3>Limity wysyłania plików</h3>
@@ -441,66 +447,112 @@ header('Content-Type: text/html; charset=utf-8');
 
 <script>
 (function () {
-    var ROZMIAR = 4096;
-    var bajty = new Uint8Array(ROZMIAR);
-    for (var i = 0; i < ROZMIAR; i++) { bajty[i] = i % 251; }
-    var plik = new File([bajty], 'sonda.bin', { type: 'application/octet-stream' });
+    /* Zaczynamy od 1 kB, bo jeśli serwer obcina treść, próg bywa niski.
+       Sondujemy przez api.php — tę samą ścieżkę, którą działa cały panel. */
+    var ROZMIARY = [1024, 8 * 1024, 32 * 1024, 128 * 1024, 512 * 1024];
 
-    function wyslij(opcje) {
+    var METODY = [
+        { klucz: 'json',      nazwa: 'JSON (kanał panelu, używany przy wysyłce fragmentami)' },
+        { klucz: 'strumien',  nazwa: 'Strumień binarny' },
+        { klucz: 'base64',    nazwa: 'Base64 w formularzu' },
+        { klucz: 'multipart', nazwa: 'Klasyczny multipart' }
+    ];
+
+    function etykieta(n) {
+        return n >= 1024 * 1024 ? (n / 1024 / 1024) + ' MB' : (n / 1024) + ' kB';
+    }
+
+    function dane(n) {
+        var b = new Uint8Array(n);
+        for (var i = 0; i < n; i++) { b[i] = i % 251; }
+        return b;
+    }
+
+    function base64url(b) {
+        var s = '', krok = 8192;
+        for (var i = 0; i < b.length; i += krok) {
+            s += String.fromCharCode.apply(null, b.subarray(i, i + krok));
+        }
+        return btoa(s).replace(/\+/g, '-').replace(/\//g, '_');
+    }
+
+    function wyslij(typ, tresc) {
         return new Promise(function (resolve) {
             var xhr = new XMLHttpRequest();
-            xhr.open('POST', 'diagnostyka.php?sonda=1');
-            if (opcje.typ) { xhr.setRequestHeader('Content-Type', opcje.typ); }
+            xhr.open('POST', 'api.php?action=probe');
+            if (typ) { xhr.setRequestHeader('Content-Type', typ); }
+            xhr.timeout = 30000;
             xhr.onload = function () {
                 try { resolve(JSON.parse(xhr.responseText)); }
                 catch (e) { resolve({ blad: 'HTTP ' + xhr.status }); }
             };
-            xhr.onerror = function () { resolve({ blad: 'brak połączenia' }); };
-            xhr.send(opcje.tresc);
+            xhr.onerror = function () { resolve({ blad: 'żądanie odrzucone' }); };
+            xhr.ontimeout = function () { resolve({ blad: 'przekroczony czas' }); };
+            xhr.send(tresc);
         });
     }
 
-    function base64url(buf) {
-        var s = '', b = new Uint8Array(buf);
-        for (var i = 0; i < b.length; i++) { s += String.fromCharCode(b[i]); }
-        return btoa(s).replace(/\+/g, '-').replace(/\//g, '_');
+    function sprawdz(n) {
+        var b = dane(n);
+        var b64 = base64url(b);
+        var json = JSON.stringify({ d: b64 });
+        var pole = 'd=' + b64;
+        var fd = new FormData();
+        fd.append('f', new File([b], 'sonda.bin', { type: 'application/octet-stream' }));
+
+        return Promise.all([
+            wyslij('application/json', json),
+            wyslij('application/octet-stream', b),
+            wyslij('application/x-www-form-urlencoded', pole),
+            wyslij(null, fd)
+        ]).then(function (w) {
+            return {
+                n: n,
+                json:      w[0].blad ? -1 : (w[0].input_bytes === json.length ? n : 0),
+                strumien:  w[1].blad ? -1 : (w[1].input_bytes === n ? n : 0),
+                base64:    w[2].blad ? -1 : (w[2].post_bytes === b64.length ? n : 0),
+                multipart: w[3].blad ? -1 : (w[3].file_bytes === n ? n : 0)
+            };
+        });
     }
 
-    var formularz = new FormData();
-    formularz.append('plik', plik);
+    function komorka(ile, oczekiwano) {
+        if (ile === oczekiwano) { return 'OK — dotarło w całości'; }
+        if (ile < 0) { return 'żądanie odrzucone przez serwer'; }
+        return 'treść nie dotarła';
+    }
 
-    Promise.all([
-        wyslij({ typ: 'application/octet-stream', tresc: plik }),
-        wyslij({ typ: 'application/x-www-form-urlencoded', tresc: 'b64_data=' + base64url(bajty.buffer) }),
-        wyslij({ typ: null, tresc: formularz })
-    ]).then(function (wyniki) {
-        var opisy = [
-            ['Strumień (domyślna metoda panelu)', wyniki[0].strumien, wyniki[0]],
-            ['Base64 w formularzu (pierwsza zapasowa)', wyniki[1].base64, wyniki[1]],
-            ['Klasyczny multipart (druga zapasowa)', wyniki[2].multipart, wyniki[2]]
-        ];
+    var wyniki = [];
+    ROZMIARY.reduce(function (lancuch, n) {
+        return lancuch.then(function () {
+            return sprawdz(n).then(function (w) { wyniki.push(w); });
+        });
+    }, Promise.resolve()).then(function () {
         var html = '';
-        var jakakolwiek = false;
+        var maks = { json: 0, strumien: 0, base64: 0, multipart: 0 };
 
-        opisy.forEach(function (o) {
-            var ile = o[1];
-            var ok = ile === ROZMIAR;
-            if (ok) { jakakolwiek = true; }
-            var opis;
-            if (o[2].blad) { opis = 'nie udało się: ' + o[2].blad; }
-            else if (ok) { opis = 'dotarło ' + ile + ' z ' + ROZMIAR + ' B'; }
-            else if (ile === 0) { opis = 'dotarło 0 B — ta metoda nie działa'; }
-            else if (ile < 0) { opis = 'PHP zgłosił błąd wysyłki (kod ' + (-ile) + ')'; }
-            else { opis = 'dotarło ' + ile + ' z ' + ROZMIAR + ' B — niepełne'; }
-
-            html += '<tr class="' + (ok ? 'ok' : 'zle') + '"><td class="i">' + (ok ? '✔' : '✖')
-                 + '</td><td class="n">' + o[0] + '</td><td class="w">' + opis + '</td></tr>';
+        METODY.forEach(function (m) {
+            wyniki.forEach(function (w) {
+                var ok = w[m.klucz] === w.n;
+                if (ok) { maks[m.klucz] = Math.max(maks[m.klucz], w.n); }
+                html += '<tr class="' + (ok ? 'ok' : 'zle') + '"><td class="i">' + (ok ? '✔' : '✖')
+                     + '</td><td class="n">' + m.nazwa + ' — ' + etykieta(w.n)
+                     + '</td><td class="w">' + komorka(w[m.klucz], w.n) + '</td></tr>';
+            });
         });
 
-        html += '<tr class="' + (jakakolwiek ? 'ok' : 'zle') + '"><td class="i">'
-             + (jakakolwiek ? '✔' : '✖') + '</td><td class="n">Wysyłanie plików w panelu</td><td class="w">'
-             + (jakakolwiek ? 'zadziała — panel użyje działającej metody'
-                            : 'NIE ZADZIAŁA — żadna metoda nie dostarcza danych, zgłoś to hostingowi')
+        var najlepsza = Math.max(maks.json, maks.strumien, maks.base64, maks.multipart);
+        var dziala = najlepsza > 0;
+
+        html += '<tr class="' + (dziala ? 'ok' : 'zle') + '"><td class="i">' + (dziala ? '✔' : '✖')
+             + '</td><td class="n">Największa porcja, która dociera</td><td class="w">'
+             + (dziala ? etykieta(najlepsza) + ' (JSON do ' + etykieta(maks.json || 0) + ')'
+                       : 'żadna — serwer odrzuca nawet 1 kB') + '</td></tr>';
+
+        html += '<tr class="' + (dziala ? 'ok' : 'zle') + '"><td class="i">' + (dziala ? '✔' : '✖')
+             + '</td><td class="n">Wysyłanie plików w panelu</td><td class="w">'
+             + (dziala ? 'zadziała — panel dobierze metodę i rozmiar porcji'
+                       : 'NIE ZADZIAŁA — zgłoś hostingowi, że serwer obcina treść żądań POST')
              + '</td></tr>';
 
         document.getElementById('transport').innerHTML = html;

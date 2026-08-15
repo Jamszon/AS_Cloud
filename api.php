@@ -62,6 +62,28 @@ function route(string $action): array
         return ['ok' => true, 'logged_in' => $me !== null];
     }
 
+    /*
+     * Sonda transportu dla diagnostyki: mówi wyłącznie, ile bajtów treści
+     * żądania faktycznie dotarło do PHP. Nie wymaga zalogowania, bo służy do
+     * zbadania, czemu nic nie dochodzi — a nie ujawnia żadnych danych.
+     */
+    if ($action === 'probe') {
+        $surowe = (string)@file_get_contents('php://input');
+        $zPola  = isset($_POST['d']) ? strlen((string)$_POST['d']) : -1;
+        $zPliku = isset($_FILES['f']) && (int)$_FILES['f']['error'] === UPLOAD_ERR_OK
+            ? (int)$_FILES['f']['size']
+            : -1;
+
+        return [
+            'ok'             => true,
+            'content_type'   => (string)($_SERVER['CONTENT_TYPE'] ?? ''),
+            'content_length' => (int)($_SERVER['CONTENT_LENGTH'] ?? 0),
+            'input_bytes'    => strlen($surowe),
+            'post_bytes'     => $zPola,
+            'file_bytes'     => $zPliku,
+        ];
+    }
+
     $me = current_user();
     if ($me === null) {
         throw new ApiError('Sesja wygasła. Zaloguj się ponownie.', 401);
@@ -71,7 +93,7 @@ function route(string $action): array
     $writes = [
         'folder.create', 'folder.rename', 'folder.delete', 'folder.reorder',
         'task.create', 'task.update', 'task.delete',
-        'note.save', 'file.upload', 'file.delete', 'file.assign',
+        'note.save', 'file.upload', 'file.chunk', 'file.delete', 'file.assign',
     ];
     if (in_array($action, $writes, true)) {
         if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') {
@@ -101,6 +123,7 @@ function route(string $action): array
         case 'note.save':     return action_note_save($me);
 
         case 'file.upload':   return action_file_upload($me);
+        case 'file.chunk':    return action_file_chunk($me);
         case 'file.delete':   return action_file_delete($me);
         case 'file.assign':   return action_file_assign($me);
     }
@@ -522,11 +545,12 @@ function action_file_upload_raw(array $me): array
  * katalog tymczasowy (multipart), ani odczyt php://input (strumień).
  * Pola formularza PHP trzyma w pamięci, więc żaden plik pośredni nie powstaje.
  */
-function action_file_upload_b64(array $me): array
+function action_file_upload_b64(array $me, ?array $pola = null): array
 {
-    $folder = folder_or_fail((int)($_POST['folder_id'] ?? 0));
+    $pola   = $pola ?? $_POST;
+    $folder = folder_or_fail((int)($pola['folder_id'] ?? 0));
 
-    $original = clean_line(basename(str_replace('\\', '/', (string)($_POST['b64_name'] ?? ''))), 180);
+    $original = clean_line(basename(str_replace('\\', '/', (string)($pola['b64_name'] ?? ''))), 180);
     if ($original === '') {
         throw new ApiError('Brak nazwy pliku w żądaniu.');
     }
@@ -539,9 +563,9 @@ function action_file_upload_b64(array $me): array
 
     /* Przeglądarka wysyła wariant base64url (- i _ zamiast + i /), żeby nic
        nie wymagało dodatkowego kodowania w treści formularza. */
-    $zakodowane = strtr((string)($_POST['b64_data'] ?? ''), '-_', '+/');
+    $zakodowane = strtr((string)($pola['b64_data'] ?? ''), '-_', '+/');
     if ($zakodowane === '') {
-        throw new ApiError('Serwer nie otrzymał zawartości pliku (pole b64_data było puste).');
+        throw new ApiError('Serwer nie otrzymał zawartości pliku — pole b64_data dotarło puste. [retry:multipart]');
     }
 
     $bajty = base64_decode($zakodowane, true);
@@ -567,7 +591,107 @@ function action_file_upload_b64(array $me): array
     @chmod($target, 0640);
 
     return finalize_upload($me, $folder, $stored, $original, $ext, strlen($bajty),
-        $_POST['task_id'] ?? null, $target);
+        $pola['task_id'] ?? null, $target);
+}
+
+/**
+ * Wysyłka pliku w małych porcjach, każda osobnym żądaniem JSON.
+ *
+ * Najpewniejsza z metod: idzie tym samym kanałem, co reszta panelu
+ * (zwykły POST z ciałem JSON), więc działa nawet tam, gdzie serwer obcina
+ * duże żądania — a to typowe ustawienie zapór aplikacyjnych na hostingach
+ * współdzielonych. Kolejne fragmenty dopisujemy do pliku roboczego
+ * `.part_<id>` w uploads/, a przy ostatnim sprawdzamy sygnaturę i nadajemy
+ * plikowi docelową nazwę.
+ */
+function action_file_chunk(array $me): array
+{
+    $dane     = body();
+    $uploadId = (string)($dane['upload_id'] ?? '');
+    if (!preg_match('/^[a-f0-9]{32}$/', $uploadId)) {
+        throw new ApiError('Nieprawidłowy identyfikator wysyłki.');
+    }
+
+    $folder = folder_or_fail((int)($dane['folder_id'] ?? 0));
+    $indeks = (int)($dane['index'] ?? -1);
+    if ($indeks < 0 || $indeks > 5000) {
+        throw new ApiError('Nieprawidłowy numer fragmentu.');
+    }
+
+    $original = clean_line(basename(str_replace('\\', '/', (string)($dane['name'] ?? ''))), 180);
+    $allowed  = ALLOWED_EXT;
+    $ext      = strtolower((string)pathinfo($original, PATHINFO_EXTENSION));
+    if (!array_key_exists($ext, $allowed)) {
+        throw new ApiError('Niedozwolony typ pliku. Dozwolone rozszerzenia: ' . implode(', ', array_keys($allowed)) . '.');
+    }
+
+    if (!is_dir(UPLOAD_DIR)) {
+        throw new ApiError('Na serwerze nie ma katalogu uploads/. Utwórz go przez FTP obok index.php.');
+    }
+    if (!is_writable(UPLOAD_DIR)) {
+        throw new ApiError('Katalog uploads/ nie ma prawa zapisu. Ustaw mu przez FTP chmod 755, a jeśli to nie pomoże — 777.');
+    }
+
+    $fragment = base64_decode(strtr((string)($dane['data'] ?? ''), '-_', '+/'), true);
+    if ($fragment === false) {
+        throw new ApiError('Fragment pliku dotarł uszkodzony. Spróbuj ponownie.');
+    }
+
+    $roboczy = UPLOAD_DIR . '/.part_' . $uploadId;
+
+    if ($indeks === 0) {
+        @unlink($roboczy);
+        clean_stale_parts();
+    } elseif (!is_file($roboczy)) {
+        throw new ApiError('Brakuje wcześniejszych fragmentów pliku — zacznij wysyłkę od nowa.');
+    }
+
+    if (@file_put_contents($roboczy, $fragment, FILE_APPEND | LOCK_EX) === false) {
+        @unlink($roboczy);
+        throw new ApiError('Nie udało się dopisać fragmentu w katalogu uploads/. Sprawdź uprawnienia i limit miejsca.');
+    }
+
+    clearstatcache(true, $roboczy);
+    $zebrane = (int)@filesize($roboczy);
+    if ($zebrane > MAX_UPLOAD_BYTES) {
+        @unlink($roboczy);
+        throw new ApiError('Plik jest większy niż dozwolone 15 MB.');
+    }
+
+    if (empty($dane['final'])) {
+        return ['ok' => true, 'done' => false, 'received' => $zebrane];
+    }
+
+    /* Ostatni fragment — dopiero teraz mamy komplet do sprawdzenia. */
+    try {
+        verify_upload_content($roboczy, $ext);
+    } catch (ApiError $e) {
+        @unlink($roboczy);
+        throw $e;
+    }
+
+    $target = prepare_upload_target($ext, $stored);
+    if (!@rename($roboczy, $target)) {
+        @unlink($roboczy);
+        throw new ApiError('Nie udało się zapisać gotowego pliku w katalogu uploads/.');
+    }
+    @chmod($target, 0640);
+
+    $wynik = finalize_upload($me, $folder, $stored, $original, $ext, $zebrane,
+        $dane['task_id'] ?? null, $target);
+    $wynik['done'] = true;
+    return $wynik;
+}
+
+/** Usuwa porzucone fragmenty starsze niż 6 godzin. */
+function clean_stale_parts(): void
+{
+    $granica = time() - 6 * 3600;
+    foreach ((array)@glob(UPLOAD_DIR . '/.part_*') as $plik) {
+        if (is_file($plik) && (int)@filemtime($plik) < $granica) {
+            @unlink($plik);
+        }
+    }
 }
 
 /** Sprawdza katalog uploads/ i zwraca ścieżkę docelową z losową nazwą. */
@@ -622,22 +746,41 @@ function finalize_upload(array $me, array $folder, string $stored, string $origi
 
 function action_file_upload(array $me): array
 {
-    /* Pole b64_name oznacza wysyłkę zakodowaną w base64. */
-    if (isset($_POST['b64_name']) && $_POST['b64_name'] !== '') {
-        return action_file_upload_b64($me);
-    }
-
     /* Nagłówek X-File-Name oznacza wysyłkę surowym strumieniem. */
     if (isset($_SERVER['HTTP_X_FILE_NAME']) && $_SERVER['HTTP_X_FILE_NAME'] !== '') {
         return action_file_upload_raw($me);
     }
 
-    /* Po przekroczeniu post_max_size PHP czyści $_POST i $_FILES — wtedy
-       nie ma nawet numeru folderu, więc sprawdzamy to jako pierwsze. */
-    if (!$_POST && !$_FILES && (int)($_SERVER['CONTENT_LENGTH'] ?? 0) > 0) {
+    /*
+     * Część hostingów nie wypełnia $_POST przy zwykłym formularzu — bywa
+     * wyłączone enable_post_data_reading albo SAPI nie rozbiera treści.
+     * W takim wypadku czytamy ciało żądania i rozbieramy je samodzielnie,
+     * żeby wysyłka base64 działała niezależnie od kaprysów serwera.
+     */
+    $pola = $_POST;
+    if (!$pola && stripos((string)($_SERVER['CONTENT_TYPE'] ?? ''), 'x-www-form-urlencoded') !== false) {
+        $surowe = (string)@file_get_contents('php://input');
+        if ($surowe !== '') {
+            parse_str($surowe, $pola);
+        }
+    }
+
+    /* Pole b64_name oznacza wysyłkę zakodowaną w base64. */
+    if (isset($pola['b64_name']) && $pola['b64_name'] !== '') {
+        return action_file_upload_b64($me, $pola);
+    }
+
+    /* Brak jakichkolwiek danych mimo niezerowej długości żądania. Powodów
+       może być kilka, więc zamiast zgadywać wypisujemy fakty. */
+    if (!$pola && !$_FILES && (int)($_SERVER['CONTENT_LENGTH'] ?? 0) > 0) {
+        $dlugosc = (int)($_SERVER['CONTENT_LENGTH'] ?? 0);
         throw new ApiError(
-            'Plik jest za duży dla ustawień serwera (post_max_size = ' . ini_get('post_max_size')
-            . '). Instrukcja zwiększenia limitu jest w README.md, punkt 6.'
+            'Serwer nie przekazał PHP żadnych danych z tego żądania. '
+            . 'Wysłano ' . number_format($dlugosc / 1048576, 2, ',', ' ') . ' MB, '
+            . 'typ treści: ' . (($_SERVER['CONTENT_TYPE'] ?? '') !== '' ? $_SERVER['CONTENT_TYPE'] : 'brak') . ', '
+            . 'post_max_size = ' . ini_get('post_max_size') . ', '
+            . 'enable_post_data_reading = ' . (ini_get('enable_post_data_reading') ? 'on' : 'OFF') . '. '
+            . 'Otwórz diagnostyka.php i sprawdź sekcję „Transport wysyłki”. [retry:multipart]'
         );
     }
 

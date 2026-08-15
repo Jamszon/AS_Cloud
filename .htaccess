@@ -17,6 +17,11 @@ Options -Indexes
 <IfModule mod_rewrite.c>
     RewriteEngine On
     RewriteRule ^(data|uploads)/ - [F,L]
+
+    # Katalogi narzędzi deweloperskich. FilesMatch niżej blokuje pliki
+    # zaczynające się od kropki, ale nie pliki *wewnątrz* takiego katalogu —
+    # bez tej reguły adres /.git/config wystawiłby kod źródłowy z historią.
+    RewriteRule (^|/)\.(git|svn|hg|idea|vscode)(/|$) - [F,L]
 </IfModule>
 
 # Pliki, których nikt nie powinien pobrać bezpośrednio:

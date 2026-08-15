@@ -82,6 +82,11 @@ header('X-Content-Type-Options: nosniff');
 header('X-Frame-Options: SAMEORIGIN');
 header('Referrer-Policy: same-origin');
 
+/* Panel jest jednym plikiem z całym JavaScriptem w środku. Bez tego
+   przeglądarka po aktualizacji potrafi trzymać starą wersję i wymagać
+   ręcznego Ctrl+F5 — a wtedy działa kod sprzed poprawek. */
+header('Cache-Control: no-cache, must-revalidate, max-age=0');
+
 /* ------------------------------------------------------------------ *
  *  Helpery widoku
  * ------------------------------------------------------------------ */
@@ -1288,6 +1293,7 @@ function render_setup_error(string $message): void
             taskUploading: false,
             taskUploadPct: 0,
             filePickerOpen: false,
+            metodaWysylki: null,   // zapamiętana metoda, która działa na tym hostingu
 
             task: { open: false, id: null, title: '', description: '', status: 'todo', priority: 'normal', assignee_ids: [], saving: false, meta: {} },
             ask: { open: false, input: true, title: '', message: '', value: '', confirmText: 'Zapisz', danger: false, onOk: null, submit() {} },
@@ -1307,6 +1313,7 @@ function render_setup_error(string $message): void
             /* --------------------------- start --------------------------- */
             async init() {
                 this.dark = document.documentElement.classList.contains('dark');
+                try { this.metodaWysylki = localStorage.getItem('panel.wysylka'); } catch (e) {}
 
                 this.ask.submit = () => {
                     const fn = this.ask.onOk;
@@ -1808,27 +1815,124 @@ function render_setup_error(string $message): void
              * odrzucił strumień z powodów infrastrukturalnych, panel próbuje
              * jeszcze raz klasycznie — użytkownik nic o tym nie wie.
              */
+            /**
+             * Cztery metody wysyłki, próbowane po kolei, aż któraś zadziała:
+             *
+             *   strumień   — jedno żądanie, plik jako surowa treść
+             *   base64     — jedno żądanie, plik w polu formularza
+             *   fragmenty  — wiele małych żądań JSON (najpewniejsze)
+             *   formularz  — klasyczny multipart
+             *
+             * Metodę, która się sprawdziła, zapamiętujemy w przeglądarce,
+             * żeby kolejne wysyłki nie zaczynały od nieudanych prób.
+             */
             async sendFile(file, taskId = null) {
-                /* Kolejność prób: strumień → base64 → klasyczny formularz.
-                   Pierwsza działa wszędzie tam, gdzie hosting nie ma katalogu
-                   tymczasowego; druga dodatkowo nie wymaga php://input;
-                   trzecia to klasyka na wypadek, gdyby zawiodły obie. */
-                const proby = [
-                    () => this.wyslijStrumien(file, taskId),
-                    () => this.wyslijBase64(file, taskId),
-                    () => this.wyslijFormularz(file, taskId)
-                ];
+                const metody = {
+                    strumien:  () => this.wyslijStrumien(file, taskId),
+                    base64:    () => this.wyslijBase64(file, taskId),
+                    fragmenty: () => this.wyslijFragmentami(file, taskId),
+                    formularz: () => this.wyslijFormularz(file, taskId)
+                };
+
+                const kolejnosc = ['strumien', 'base64', 'fragmenty', 'formularz'];
+                const znana = this.metodaWysylki;
+                if (znana && kolejnosc.indexOf(znana) > 0) {
+                    kolejnosc.splice(kolejnosc.indexOf(znana), 1);
+                    kolejnosc.unshift(znana);
+                }
 
                 let ostatniBlad = null;
-                for (const probuj of proby) {
+                for (const nazwa of kolejnosc) {
                     try {
-                        return await probuj();
+                        const wynik = await metody[nazwa]();
+                        if (this.metodaWysylki !== nazwa) {
+                            this.metodaWysylki = nazwa;
+                            try { localStorage.setItem('panel.wysylka', nazwa); } catch (e) {}
+                        }
+                        return wynik;
                     } catch (e) {
                         if (!e.mozliwaPonownaProba) throw e;   // błąd merytoryczny — nie ma co powtarzać
                         ostatniBlad = e;
                     }
                 }
                 throw ostatniBlad || new Error('Nie udało się wysłać pliku.');
+            },
+
+            losowyId() {
+                let id = '';
+                for (let i = 0; i < 32; i++) {
+                    id += Math.floor(Math.random() * 16).toString(16);
+                }
+                return id;
+            },
+
+            /** Zamienia fragment pliku na base64url (bez znaków wymagających kodowania). */
+            doBase64url(blob) {
+                return new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onerror = () => reject(new Error('Nie udało się odczytać pliku z dysku.'));
+                    reader.onload = () => {
+                        const wynik = String(reader.result);
+                        resolve(wynik.slice(wynik.indexOf(',') + 1).replace(/\+/g, '-').replace(/\//g, '_'));
+                    };
+                    reader.readAsDataURL(blob);
+                });
+            },
+
+            /**
+             * Wysyłka w małych porcjach. Każdy fragment leci osobnym żądaniem
+             * JSON — tak samo jak reszta panelu, więc przechodzi nawet przez
+             * serwery obcinające duże żądania. Gdy pierwszy fragment nie
+             * dojdzie, zmniejszamy porcję i próbujemy jeszcze raz.
+             */
+            async wyslijFragmentami(file, taskId) {
+                /* Schodzimy aż do 4 kB — bywają serwery obcinające naprawdę
+                   drobne żądania, a lepiej wysłać wolno niż wcale. */
+                const MIN = 4 * 1024;
+                let rozmiarPorcji = 256 * 1024;
+                const id = this.losowyId();
+
+                let pozycja = 0;
+                let indeks = 0;
+
+                for (;;) {
+                    const koniec = Math.min(pozycja + rozmiarPorcji, file.size);
+                    const ostatni = koniec >= file.size;
+                    const dane = await this.doBase64url(file.slice(pozycja, koniec));
+
+                    let odpowiedz;
+                    try {
+                        odpowiedz = await this.api('file.chunk', {
+                            upload_id: id,
+                            index: indeks,
+                            name: file.name,
+                            folder_id: this.current.id,
+                            task_id: taskId || null,
+                            data: dane,
+                            final: ostatni
+                        }, 'POST');
+                    } catch (e) {
+                        /* Pierwszy fragment jeszcze nic nie zapisał, więc możemy
+                           bezpiecznie spróbować z mniejszą porcją. */
+                        if (indeks === 0 && rozmiarPorcji > MIN) {
+                            rozmiarPorcji = Math.floor(rozmiarPorcji / 2);
+                            continue;
+                        }
+                        if (indeks === 0) {
+                            e.mozliwaPonownaProba = true;   // niech zadziała następna metoda
+                        }
+                        throw e;
+                    }
+
+                    pozycja = koniec;
+                    indeks++;
+
+                    const pct = Math.round((pozycja / Math.max(1, file.size)) * 100);
+                    if (taskId) this.taskUploadPct = pct;
+                    else        this.uploadPct = pct;
+
+                    if (ostatni) return odpowiedz;
+                }
             },
 
             /** Wspólna obsługa odpowiedzi obu metod wysyłki. */
@@ -1904,15 +2008,7 @@ function render_setup_error(string $message): void
              */
             wyslijBase64(file, taskId) {
                 return new Promise((resolve, reject) => {
-                    const reader = new FileReader();
-
-                    reader.onerror = () => reject(new Error('Nie udało się odczytać pliku z dysku.'));
-                    reader.onload = () => {
-                        const wynik = String(reader.result);
-                        const b64 = wynik.slice(wynik.indexOf(',') + 1);
-                        /* Wariant base64url — bez znaków wymagających kodowania. */
-                        const dane = b64.replace(/\+/g, '-').replace(/\//g, '_');
-
+                    this.doBase64url(file).then((dane) => {
                         const tresc = 'b64_name=' + encodeURIComponent(file.name)
                             + '&folder_id=' + encodeURIComponent(this.current.id)
                             + (taskId ? '&task_id=' + encodeURIComponent(taskId) : '')
@@ -1932,9 +2028,7 @@ function render_setup_error(string $message): void
                             reject(blad);
                         };
                         xhr.send(tresc);
-                    };
-
-                    reader.readAsDataURL(file);
+                    }).catch(reject);
                 });
             },
 

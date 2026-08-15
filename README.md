@@ -263,10 +263,15 @@ na dysk lokalny.
 
 ### Zalecenia
 
-1. **Włącz HTTPS** (certyfikat Let's Encrypt jest darmowy w każdym panelu
+1. **Nie wgrywaj katalogu `.git` na serwer.** Jeśli trzymasz projekt
+   w repozytorium, przez FTP kopiuj wyłącznie pliki aplikacji. Adres
+   `/.git/config` udostępniłby cały kod źródłowy razem z historią zmian.
+   `.htaccess` blokuje ten katalog, ale to zabezpieczenie działa tylko wtedy,
+   gdy hosting respektuje `.htaccess` — najpewniej po prostu go tam nie mieć.
+2. **Włącz HTTPS** (certyfikat Let's Encrypt jest darmowy w każdym panelu
    hostingu). Bez tego hasło leci przez sieć otwartym tekstem.
-2. Zmień domyślne hasło `projekt123` na własne.
-3. Panel jest przeznaczony dla zaufanego zespołu — nie ma ról ani uprawnień,
+3. Zmień domyślne hasło `projekt123` na własne (patrz punkt 4 instrukcji).
+4. Panel jest przeznaczony dla zaufanego zespołu — nie ma ról ani uprawnień,
    każda z czterech osób widzi i może zmieniać wszystko.
 
 ---
@@ -323,6 +328,7 @@ logowanie i dziennik aktywności.
 | `task.create` / `task.update` / `task.delete` | POST | Operacje na zadaniach |
 | `note.save` | POST | Zapis notatki folderu |
 | `file.upload` / `file.delete` | POST | Załączniki (`task_id` podpina plik pod zadanie już przy wysyłce) |
+| `file.chunk` | POST | Fragment pliku przy wysyłce porcjami; `final: true` kończy i składa całość |
 | `file.assign` | POST | Podpina istniejący plik pod zadanie albo odpina (`task_id: null`) |
 | `download` | GET | Pobranie lub podgląd pliku (`&inline=1`) |
 
@@ -348,7 +354,18 @@ zadziała. Użytkownik nic nie zauważa — widzi jeden pasek postępu.
 |---|---|---|
 | 1 | Strumień — plik jako surowe ciało POST, metadane w nagłówkach `X-File-Name`, `X-Folder-Id`, `X-Task-Id` | katalogu tymczasowego |
 | 2 | Base64 w polu formularza (`b64_name`, `b64_data`, wariant base64url) | katalogu tymczasowego ani `php://input` |
-| 3 | Klasyczny `multipart` | — |
+| 3 | Fragmenty — plik dzielony na porcje, każda osobnym żądaniem JSON (`file.chunk`) | dużych żądań; porcja schodzi automatycznie z 256 kB do 32 kB |
+| 4 | Klasyczny `multipart` | — |
+
+Metoda trzecia jest najpewniejsza: idzie tym samym kanałem, co reszta panelu,
+więc przechodzi także przez zapory obcinające duże żądania POST (typowe
+ustawienie ModSecurity na hostingach współdzielonych to 128 kB dla żądań
+niebędących wysyłką pliku). Fragmenty dopisywane są do pliku roboczego
+`.part_<id>` w `uploads/`; sygnatura sprawdzana jest dopiero po złożeniu
+całości, a porzucone fragmenty starsze niż 6 godzin kasują się same.
+
+Metodę, która zadziałała, panel zapamiętuje w przeglądarce i przy kolejnych
+wysyłkach zaczyna od niej — bez powtarzania nieudanych prób.
 
 Serwer rozpoznaje metodę po nagłówku lub polu i obsługuje wszystkie trzy
 identycznie: ten sam limit rozmiaru, ta sama biała lista rozszerzeń, ta sama
