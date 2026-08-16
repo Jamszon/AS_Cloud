@@ -177,6 +177,35 @@ o wyższym priorytecie same wskakują na górę swojej kolumny. Karty z prioryte
 innym niż normalny dostają kolorową plakietkę (czerwoną albo niebieską);
 normalne zostają bez plakietki, żeby tablica nie robiła się hałaśliwa.
 
+**Termin wykonania** — ustawiasz go w oknie zadania albo od razu przy dodawaniu.
+Obok pola daty są skróty *Dziś*, *Jutro* i *Za tydzień*. Karta pokazuje termin
+plakietką, która sama dobiera kolor:
+
+- **czerwona** — po terminie (np. „3 dni po terminie"),
+- **bursztynowa** — dziś albo jutro,
+- **szara** — termin dalej w przyszłości.
+
+Zadania po terminie wskakują na samą górę kolumny, przed priorytetami — to
+najpilniejsza informacja na tablicy. Zadania zrobione nigdy nie są oznaczane
+jako spóźnione; pokazują po prostu datę, na kiedy były planowane.
+
+**Filtrowanie tablicy** — pasek obok zakładek zawęża widok bez przeładowywania
+strony: po treści zadania (szuka też w opisie), po osobie, po priorytecie oraz
+przełącznik *Termin* pokazujący tylko zadania z ustawioną datą. Filtry można
+łączyć, a krzyżyk obok czyści wszystkie naraz. Filtry działają wyłącznie
+w Twojej przeglądarce — reszta zespołu widzi tablicę bez zmian.
+
+**Moje zadania** — pierwsza pozycja w bocznym panelu. Zbiera zadania przypisane
+do Ciebie ze **wszystkich folderów** i grupuje je według pilności: *Po terminie*,
+*Na dziś*, *Najbliższe dni*, *Później*, *Bez terminu*. Zrobione znikają z listy.
+Licznik przy nazwie robi się czerwony, gdy cokolwiek jest po terminie. Kliknięcie
+zadania przenosi do jego folderu i otwiera okno szczegółów.
+
+**Komentarze** — okno zadania ma osobną sekcję dyskusji, niezależną od opisu.
+Każdy wpis ma autora i czas, `Ctrl+Enter` wysyła. Swój komentarz można usunąć,
+cudzego nie — chodzi o to, żeby nikt nie zmieniał cudzej wypowiedzi. Karta na
+tablicy pokazuje liczbę komentarzy ikoną dymka.
+
 **Notatka** — wspólne pole tekstowe z obsługą Markdown (`#` nagłówki,
 `- ` listy, `**pogrubienie**`, `[link](https://…)`, ``` bloki kodu ```).
 Otwiera się domyślnie w **podglądzie**, więc treść widać od razu po wejściu;
@@ -338,7 +367,10 @@ logowanie i dziennik aktywności.
 | `folder.open` | GET | Zadania, notatka i pliki jednego folderu |
 | `folder.create` / `folder.rename` / `folder.delete` | POST | Operacje na folderach |
 | `folder.reorder` | POST | Nowa kolejność folderów po przeciągnięciu |
-| `task.create` / `task.update` / `task.delete` | POST | Operacje na zadaniach |
+| `task.create` / `task.update` / `task.delete` | POST | Operacje na zadaniach (`due_date` w formacie `RRRR-MM-DD` albo `null`) |
+| `task.mine` | GET | Otwarte zadania przypisane do zalogowanej osoby, ze wszystkich folderów |
+| `comment.list` | GET | Komentarze pod zadaniem |
+| `comment.add` / `comment.delete` | POST | Dyskusja pod zadaniem (skasować może tylko autor) |
 | `note.save` | POST | Zapis notatki folderu |
 | `file.upload` / `file.delete` | POST | Załączniki (`task_id` podpina plik pod zadanie już przy wysyłce) |
 | `file.chunk` | POST | Fragment pliku przy wysyłce porcjami; `final: true` kończy i składa całość |
@@ -395,10 +427,12 @@ faktycznie dotarło.
 
 ### Tabele bazy
 
-`users`, `folders`, `tasks`, `task_assignees`, `notes`, `files`, `activity`,
-`login_attempts`. Przypisania osób do zadań leżą w `task_assignees` (jedno
-zadanie ↔ wiele osób), a `files.task_id` wskazuje zadanie, pod które podpięto
+`users`, `folders`, `tasks`, `task_assignees`, `task_comments`, `notes`,
+`files`, `activity`, `login_attempts`. Przypisania osób do zadań leżą
+w `task_assignees` (jedno zadanie ↔ wiele osób), `task_comments` trzyma
+dyskusję pod zadaniem, a `files.task_id` wskazuje zadanie, pod które podpięto
 załącznik — wartość `NULL` oznacza plik należący do całego folderu.
+Termin wykonania to `tasks.due_date` w formacie `RRRR-MM-DD` (`NULL` = brak).
 Każdy wpis w `folders`, `tasks`, `notes` i `files` niesie informację o autorze
 (`created_by` / `uploaded_by`) i ostatniej zmianie (`updated_by`, `updated_at`),
 dzięki czemu widać, kto co zrobił.

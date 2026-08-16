@@ -127,6 +127,8 @@ function icon(string $name, string $class = 'h-5 w-5'): string
         'search'   => '<path d="m21 21-5.2-5.2m0 0a7.5 7.5 0 1 0-10.6-10.6 7.5 7.5 0 0 0 10.6 10.6Z"/>',
         'logout'   => '<path d="M15.8 9V5.3A2.3 2.3 0 0 0 13.5 3h-6a2.3 2.3 0 0 0-2.3 2.3v13.5A2.3 2.3 0 0 0 7.5 21h6a2.3 2.3 0 0 0 2.3-2.3V15M12 9l-3 3m0 0 3 3m-3-3h12.8"/>',
         'clock'    => '<path d="M12 6v6h4.5M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/>',
+        'comment'  => '<path d="M8.6 15.5a19 19 0 0 0 3.4.3c1.2 0 2.3-.1 3.4-.3a2.8 2.8 0 0 0 2.3-2.3c.1-.9.2-1.8.2-2.7 0-.9-.1-1.8-.2-2.7a2.8 2.8 0 0 0-2.3-2.3A19 19 0 0 0 12 5c-1.2 0-2.3.1-3.4.3a2.8 2.8 0 0 0-2.3 2.3c-.1.9-.2 1.8-.2 2.7 0 1.5.2 2.4.4 3.3L4.5 19l4.1-3.5Z"/>',
+        'calendar' => '<path d="M6.8 3v2.3m10.4-2.3v2.3M3.8 18.7V8.3a2.3 2.3 0 0 1 2.2-2.3h12a2.3 2.3 0 0 1 2.2 2.3v10.4a2.3 2.3 0 0 1-2.2 2.3H6a2.3 2.3 0 0 1-2.2-2.3Zm0-8.4h16.4"/>',
         'lock'     => '<path d="M16.5 10.5V6.8a4.5 4.5 0 1 0-9 0v3.7m-.8 11.3h10.5a2.3 2.3 0 0 0 2.3-2.3v-6.7a2.3 2.3 0 0 0-2.3-2.3H6.8a2.3 2.3 0 0 0-2.3 2.3v6.7a2.3 2.3 0 0 0 2.3 2.3Z"/>',
         'eye'      => '<path d="M2 12.3a1 1 0 0 1 0-.6C3.4 7.5 7.4 4.5 12 4.5c4.6 0 8.6 3 10 7.2a1 1 0 0 1 0 .6c-1.4 4.2-5.4 7.2-10 7.2-4.6 0-8.6-3-10-7.2Z"/><path d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"/>',
         'arrow'    => '<path d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3"/>',
@@ -468,6 +470,25 @@ function render_setup_error(string $message): void
             </button>
         </div>
 
+        <!-- Zadania przypisane do mnie ze wszystkich folderów naraz -->
+        <div class="px-4 pb-3">
+            <button @click="pokazMoje()"
+                    :class="view === 'mine' ? 'bg-brandsoft text-brandink ring-1 ring-brand-200 dark:ring-brand-800' : 'text-ink2 hover:bg-surface3'"
+                    class="flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-left transition">
+                <span :class="view === 'mine' ? 'text-brand-500' : 'text-faint'">
+                    <?= icon('users', 'h-[18px] w-[18px]') ?>
+                </span>
+                <span class="min-w-0 flex-1">
+                    <span class="block text-sm font-medium">Moje zadania</span>
+                    <span class="block text-[11px] text-faint">Ze wszystkich folderów</span>
+                </span>
+                <span x-show="mineCount > 0" x-cloak
+                      :class="mineOverdue > 0 ? 'bg-red-500' : 'bg-brand-600'"
+                      class="rounded-full px-2 py-0.5 text-[11px] font-semibold text-white"
+                      x-text="mineCount"></span>
+            </button>
+        </div>
+
         <div class="px-4 pb-3">
             <div class="relative">
                 <span class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-faint">
@@ -496,12 +517,12 @@ function render_setup_error(string $message): void
 
                     <button @click="selectFolder(f.id)"
                             :class="[
-                                current && current.id === f.id ? 'bg-brandsoft text-brandink' : 'text-ink2 hover:bg-surface3',
+                                view === 'folder' && current && current.id === f.id ? 'bg-brandsoft text-brandink' : 'text-ink2 hover:bg-surface3',
                                 folderDragOver === f.id && folderDrag !== f.id ? 'ring-2 ring-brand-400' : ''
                             ]"
                             :title="folderQuery === '' ? 'Przeciągnij, aby zmienić kolejność' : ''"
                             class="flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2.5 pr-16 text-left transition">
-                        <span :class="current && current.id === f.id ? 'text-brand-500' : 'text-faint'">
+                        <span :class="view === 'folder' && current && current.id === f.id ? 'text-brand-500' : 'text-faint'">
                             <?= icon('folder', 'h-[18px] w-[18px]') ?>
                         </span>
                         <span class="min-w-0 flex-1">
@@ -569,7 +590,20 @@ function render_setup_error(string $message): void
                 </button>
 
                 <div class="min-w-0 flex-1">
-                    <template x-if="current">
+                    <template x-if="view === 'mine'">
+                        <div>
+                            <h1 class="truncate text-lg font-semibold tracking-tight text-ink">Moje zadania</h1>
+                            <p class="truncate text-xs text-faint">
+                                <span x-text="mineCount"></span> otwartych zadań przypisanych do Ciebie
+                                <template x-if="mineOverdue > 0">
+                                    <span class="font-semibold text-red-600 dark:text-red-400">
+                                        · <span x-text="mineOverdue"></span> po terminie
+                                    </span>
+                                </template>
+                            </p>
+                        </div>
+                    </template>
+                    <template x-if="view === 'folder' && current">
                         <div class="flex items-center gap-1.5">
                             <h1 class="truncate text-lg font-semibold tracking-tight text-ink" x-text="current.name"></h1>
                             <button @click="renameFolder(current)" title="Zmień nazwę folderu"
@@ -582,10 +616,10 @@ function render_setup_error(string $message): void
                             </button>
                         </div>
                     </template>
-                    <template x-if="!current">
+                    <template x-if="view === 'folder' && !current">
                         <h1 class="text-lg font-semibold tracking-tight text-ink">Panel</h1>
                     </template>
-                    <p x-show="current" class="truncate text-xs text-faint">
+                    <p x-show="view === 'folder' && current" class="truncate text-xs text-faint">
                         Utworzył: <span x-text="current && current.created_by_name"></span>,
                         <span x-text="current && fmtFull(current.created_at)"></span>
                     </p>
@@ -616,7 +650,7 @@ function render_setup_error(string $message): void
                 </button>
             </div>
 
-            <div x-show="current" class="flex items-center gap-1 overflow-x-auto px-4 pb-3 sm:px-6">
+            <div x-show="view === 'folder' && current" class="flex items-center gap-1 overflow-x-auto px-4 pb-3 sm:px-6">
                 <div class="flex items-center gap-1 rounded-xl bg-surface3 p-1">
                     <button @click="tab = 'board'"
                             :class="tab === 'board' ? 'bg-surface text-brandink shadow-sm' : 'text-muted hover:text-ink2'"
@@ -637,13 +671,59 @@ function render_setup_error(string $message): void
                         <span class="rounded-md bg-surface2 px-1.5 text-[11px] font-semibold text-muted" x-text="files.length"></span>
                     </button>
                 </div>
+
+                <!-- ---- Filtry tablicy ---- -->
+                <div x-show="tab === 'board'" class="ml-2 flex items-center gap-2 border-l border-line pl-3">
+                    <div class="relative">
+                        <span class="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-faint">
+                            <?= icon('search', 'h-3.5 w-3.5') ?>
+                        </span>
+                        <input x-model="filtr.tekst" type="search" placeholder="Szukaj w zadaniach…"
+                               class="w-44 rounded-lg border-line bg-surface2 py-1.5 pl-8 pr-2 text-xs text-ink placeholder:text-faint focus:border-brand-400 focus:ring-1 focus:ring-brand-200 dark:focus:ring-brand-800">
+                    </div>
+
+                    <div class="flex items-center gap-1" title="Filtruj po osobie">
+                        <template x-for="u in users" :key="u.id">
+                            <button @click="przelaczFiltrOsoby(u.id)"
+                                    :title="u.name"
+                                    :class="filtr.osoby.includes(u.id) ? 'ring-2 ring-offset-1 ring-brand-400 ring-offset-surface' : 'opacity-40 hover:opacity-100'"
+                                    class="flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-bold text-white transition"
+                                    :style="'background:' + accent(u.color).solid"
+                                    x-text="initials(u.name)"></button>
+                        </template>
+                    </div>
+
+                    <div class="flex items-center gap-1">
+                        <template x-for="p in priorities" :key="p.key">
+                            <button @click="przelaczFiltrPriorytetu(p.key)"
+                                    :title="'Priorytet: ' + p.label"
+                                    :class="filtr.priorytety.includes(p.key) ? 'ring-2 ring-brand-400' : 'opacity-40 hover:opacity-100'"
+                                    :style="priorityStyle(p.key)"
+                                    class="rounded-md px-1.5 py-1 text-[10px] font-bold uppercase transition"
+                                    x-text="p.label.slice(0, 3)"></button>
+                        </template>
+                    </div>
+
+                    <button @click="filtr.tylkoTerminy = !filtr.tylkoTerminy"
+                            title="Pokaż tylko zadania z terminem"
+                            :class="filtr.tylkoTerminy ? 'border-brand-400 bg-brandsoft text-brandink' : 'border-line text-muted hover:border-linestrong'"
+                            class="rounded-lg border px-2 py-1 text-[10px] font-semibold uppercase transition">
+                        Termin
+                    </button>
+
+                    <button x-show="filtrAktywny" x-cloak @click="wyczyscFiltry()"
+                            title="Wyczyść filtry"
+                            class="rounded-lg p-1.5 text-faint transition hover:bg-surface3 hover:text-red-600">
+                        <?= icon('close', 'h-3.5 w-3.5') ?>
+                    </button>
+                </div>
             </div>
         </header>
 
         <main class="min-h-0 flex-1 overflow-hidden">
 
             <!-- ---------- Stan pusty ---------- -->
-            <div x-show="!current" x-cloak class="grid h-full place-items-center p-6">
+            <div x-show="view === 'folder' && !current" x-cloak class="grid h-full place-items-center p-6">
                 <div class="max-w-sm text-center">
                     <div class="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-brandsoft text-brand-500">
                         <?= icon('inbox', 'h-8 w-8') ?>
@@ -659,8 +739,88 @@ function render_setup_error(string $message): void
                 </div>
             </div>
 
+            <!-- ---------- Moje zadania (wszystkie foldery) ---------- -->
+            <div x-show="view === 'mine'" x-cloak class="thin-scroll h-full overflow-y-auto p-4 sm:p-6">
+                <div class="mx-auto max-w-3xl space-y-3">
+
+                    <div x-show="!mineTasks.length" class="rounded-2xl border border-line bg-surface p-10 text-center">
+                        <div class="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-brandsoft text-brand-500">
+                            <?= icon('check', 'h-7 w-7') ?>
+                        </div>
+                        <h2 class="text-base font-semibold text-ink">Nic na Ciebie nie czeka</h2>
+                        <p class="mt-1.5 text-sm text-muted">
+                            Nie masz otwartych zadań przypisanych do siebie. Zrobione znikają z tej listy.
+                        </p>
+                    </div>
+
+                    <template x-for="grupa in mineGrouped" :key="grupa.klucz">
+                        <section>
+                            <h2 class="mb-2 flex items-center gap-2 px-1 text-xs font-semibold uppercase tracking-wider"
+                                :class="grupa.pilne ? 'text-red-600 dark:text-red-400' : 'text-faint'">
+                                <span x-text="grupa.etykieta"></span>
+                                <span class="rounded-md bg-surface3 px-1.5 text-[11px] font-semibold text-muted"
+                                      x-text="grupa.zadania.length"></span>
+                            </h2>
+
+                            <div class="overflow-hidden rounded-2xl border border-line bg-surface shadow-card">
+                                <template x-for="t in grupa.zadania" :key="t.id">
+                                    <div @click="otworzZMoich(t)"
+                                         class="flex cursor-pointer items-start gap-3 border-b border-line px-4 py-3 transition last:border-0 hover:bg-surface2">
+
+                                        <button @click.stop="toggleDone(t)" title="Oznacz jako zrobione"
+                                                class="mt-0.5 flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-md border-2 border-linestrong text-transparent transition hover:border-emerald-400">
+                                            <?= icon('check', 'h-3 w-3') ?>
+                                        </button>
+
+                                        <div class="min-w-0 flex-1">
+                                            <div class="flex flex-wrap items-center gap-1.5">
+                                                <p class="text-sm font-medium text-ink" x-text="t.title"></p>
+                                                <template x-if="t.priority !== 'normal'">
+                                                    <span class="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-bold uppercase"
+                                                          :style="priorityStyle(t.priority)">
+                                                        <span x-html="priorityIcon(t.priority)"></span>
+                                                        <span x-text="priorityLabel(t.priority)"></span>
+                                                    </span>
+                                                </template>
+                                                <template x-if="t.due_date">
+                                                    <span class="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-semibold"
+                                                          :style="terminStyle(t.due_date, t.status)"
+                                                          x-text="terminEtykieta(t.due_date, t.status)"></span>
+                                                </template>
+                                            </div>
+
+                                            <p class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-faint">
+                                                <span class="inline-flex items-center gap-1">
+                                                    <?= icon('folder', 'h-3 w-3') ?>
+                                                    <span class="text-muted" x-text="t.folder_name"></span>
+                                                </span>
+                                                <span x-text="'· ' + kolumnaEtykieta(t.status)"></span>
+                                                <template x-if="t.comment_count > 0">
+                                                    <span>· <span x-text="t.comment_count"></span> kom.</span>
+                                                </template>
+                                                <template x-if="t.file_count > 0">
+                                                    <span>· <span x-text="t.file_count"></span> zał.</span>
+                                                </template>
+                                            </p>
+                                        </div>
+
+                                        <span class="flex shrink-0 -space-x-1.5">
+                                            <template x-for="a in t.assignees" :key="a.id">
+                                                <span class="flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-bold text-white ring-2 ring-surface"
+                                                      :style="'background:' + accent(a.color).solid"
+                                                      :title="a.name" x-text="initials(a.name)"></span>
+                                            </template>
+                                        </span>
+                                    </div>
+                                </template>
+                            </div>
+                        </section>
+                    </template>
+                </div>
+            </div>
+
             <!-- ---------- Tablica kanban ---------- -->
-            <div x-show="current && tab === 'board'" x-cloak class="thin-scroll h-full overflow-x-auto p-4 sm:p-6">
+            <div x-show="view === 'folder' && current && tab === 'board'" x-cloak class="thin-scroll h-full overflow-x-auto p-4 sm:p-6">
                 <div class="grid h-full grid-cols-[repeat(3,minmax(276px,1fr))] gap-4">
                     <template x-for="col in columns" :key="col.key">
                         <section @dragover.prevent="dragOver = col.key"
@@ -707,6 +867,16 @@ function render_setup_error(string $message): void
                                                         class="rounded-md px-2 py-1 text-[11px] font-semibold transition"
                                                         x-text="p.label"></button>
                                             </template>
+                                        </div>
+
+                                        <div class="flex items-center gap-2">
+                                            <span class="text-[10px] font-semibold uppercase tracking-wider text-faint">Termin</span>
+                                            <input x-model="quick[col.key].due_date" type="date"
+                                                   class="rounded-lg border-line bg-surface2 px-2 py-1 text-[11px] text-ink focus:border-brand-400 focus:ring-1 focus:ring-brand-200 dark:focus:ring-brand-800">
+                                            <button x-show="quick[col.key].due_date" @click="quick[col.key].due_date = ''"
+                                                    title="Bez terminu" class="rounded p-1 text-faint hover:text-red-600">
+                                                <?= icon('close', 'h-3 w-3') ?>
+                                            </button>
                                             <button @click="addTask(col.key)" :disabled="!quick[col.key].title.trim()"
                                                     class="ml-auto rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:bg-surface3 disabled:text-faint">
                                                 Dodaj
@@ -750,6 +920,16 @@ function render_setup_error(string $message): void
                                                     <span x-text="priorityLabel(t.priority)"></span>
                                                 </span>
                                             </template>
+
+                                            <template x-if="t.due_date">
+                                                <span class="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-semibold"
+                                                      :style="terminStyle(t.due_date, t.status)"
+                                                      :title="'Termin: ' + fmtData(t.due_date)">
+                                                    <?= icon('clock', 'h-3 w-3') ?>
+                                                    <span x-text="terminEtykieta(t.due_date, t.status)"></span>
+                                                </span>
+                                            </template>
+
                                             <template x-if="t.assignees.length === 1">
                                                 <span class="inline-flex items-center gap-1.5 rounded-full py-0.5 pl-0.5 pr-2.5 text-[11px] font-medium"
                                                       :style="chipStyle(t.assignees[0].color)">
@@ -785,6 +965,14 @@ function render_setup_error(string $message): void
                                                     <span x-text="t.file_count"></span>
                                                 </span>
                                             </template>
+
+                                            <template x-if="t.comment_count > 0">
+                                                <span class="inline-flex items-center gap-1 rounded-md bg-surface3 px-1.5 py-0.5 text-[10px] font-semibold text-muted"
+                                                      :title="t.comment_count + ' komentarz(y)'">
+                                                    <?= icon('comment', 'h-3 w-3') ?>
+                                                    <span x-text="t.comment_count"></span>
+                                                </span>
+                                            </template>
                                         </div>
 
                                         <p class="mt-2 border-t border-line pl-[30px] pt-2 text-[11px] leading-relaxed text-faint">
@@ -809,7 +997,7 @@ function render_setup_error(string $message): void
             </div>
 
             <!-- ---------- Notatka ---------- -->
-            <div x-show="current && tab === 'note'" x-cloak class="thin-scroll h-full overflow-y-auto p-4 sm:p-6">
+            <div x-show="view === 'folder' && current && tab === 'note'" x-cloak class="thin-scroll h-full overflow-y-auto p-4 sm:p-6">
                 <div class="mx-auto max-w-3xl">
                     <div class="overflow-hidden rounded-2xl border border-line bg-surface shadow-card">
 
@@ -863,7 +1051,7 @@ function render_setup_error(string $message): void
             </div>
 
             <!-- ---------- Pliki ---------- -->
-            <div x-show="current && tab === 'files'" x-cloak class="thin-scroll h-full overflow-y-auto p-4 sm:p-6">
+            <div x-show="view === 'folder' && current && tab === 'files'" x-cloak class="thin-scroll h-full overflow-y-auto p-4 sm:p-6">
                 <div class="mx-auto max-w-3xl space-y-4">
 
                     <div @dragover.prevent="dropActive = true"
@@ -1063,6 +1251,31 @@ function render_setup_error(string $message): void
                 </div>
 
                 <div>
+                    <label class="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-faint">Termin wykonania</label>
+                    <div class="flex flex-wrap items-center gap-2">
+                        <div class="relative">
+                            <span class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-faint">
+                                <?= icon('calendar', 'h-4 w-4') ?>
+                            </span>
+                            <input x-model="task.due_date" type="date"
+                                   class="rounded-xl border-line bg-surface2 py-2 pl-10 pr-3 text-sm text-ink focus:border-brand-400 focus:ring-2 focus:ring-brand-100 dark:focus:ring-brand-900">
+                        </div>
+
+                        <button @click="task.due_date = dataZa(0)"
+                                class="rounded-lg border border-line px-2.5 py-1.5 text-xs font-medium text-muted transition hover:border-brand-300 hover:text-brand-600">Dziś</button>
+                        <button @click="task.due_date = dataZa(1)"
+                                class="rounded-lg border border-line px-2.5 py-1.5 text-xs font-medium text-muted transition hover:border-brand-300 hover:text-brand-600">Jutro</button>
+                        <button @click="task.due_date = dataZa(7)"
+                                class="rounded-lg border border-line px-2.5 py-1.5 text-xs font-medium text-muted transition hover:border-brand-300 hover:text-brand-600">Za tydzień</button>
+                        <button x-show="task.due_date" @click="task.due_date = ''"
+                                class="rounded-lg px-2.5 py-1.5 text-xs font-medium text-faint transition hover:text-red-600">Bez terminu</button>
+                    </div>
+                    <p x-show="task.due_date" class="mt-1.5 text-[11px]"
+                       :class="terminMinal(task.due_date) ? 'font-semibold text-red-600 dark:text-red-400' : 'text-faint'"
+                       x-text="terminOpis(task.due_date)"></p>
+                </div>
+
+                <div>
                     <label class="mb-1.5 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-faint">
                         Osoby odpowiedzialne
                         <span class="normal-case tracking-normal text-faint">— można zaznaczyć kilka</span>
@@ -1183,6 +1396,59 @@ function render_setup_error(string $message): void
                             <p x-show="!attachableFiles.length" class="px-3 py-5 text-center text-[11px] text-faint">
                                 W tym folderze nie ma innych plików. Wgraj je w zakładce „Pliki” albo przyciskiem obok.
                             </p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ---- Dyskusja pod zadaniem ---- -->
+                <div x-show="task.id">
+                    <label class="mb-1.5 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-faint">
+                        Komentarze
+                        <span x-show="comments.length" class="rounded-md bg-surface3 px-1.5 normal-case tracking-normal text-muted"
+                              x-text="comments.length"></span>
+                    </label>
+
+                    <div class="space-y-2">
+                        <p x-show="commentsLoading" class="px-1 text-xs text-faint">Wczytywanie…</p>
+
+                        <p x-show="!commentsLoading && !comments.length" class="rounded-xl border border-dashed border-line px-3 py-4 text-center text-xs text-faint">
+                            Brak komentarzy. Napisz pierwszy — opis zadania zostanie nietknięty.
+                        </p>
+
+                        <template x-for="k in comments" :key="k.id">
+                            <div class="group flex gap-2.5 rounded-xl bg-surface2 px-3 py-2.5">
+                                <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-white"
+                                      :style="'background:' + accent(k.user_color).solid"
+                                      x-text="initials(k.user_name)"></span>
+                                <div class="min-w-0 flex-1">
+                                    <p class="flex flex-wrap items-baseline gap-x-2 text-[11px]">
+                                        <span class="font-semibold text-ink" x-text="k.user_name"></span>
+                                        <span class="text-faint" x-text="fmtRel(k.at)"></span>
+                                    </p>
+                                    <p class="mt-0.5 whitespace-pre-wrap break-words text-[13px] leading-relaxed text-ink2"
+                                       x-text="k.body"></p>
+                                </div>
+                                <button x-show="k.user_id === me.id" @click="usunKomentarz(k)"
+                                        title="Usuń swój komentarz"
+                                        class="h-fit shrink-0 rounded-lg p-1.5 text-faint opacity-0 transition hover:text-red-600 group-hover:opacity-100 max-lg:opacity-100">
+                                    <?= icon('trash', 'h-3.5 w-3.5') ?>
+                                </button>
+                            </div>
+                        </template>
+
+                        <div class="rounded-xl border border-line bg-surface p-2 focus-within:border-brand-400 focus-within:ring-2 focus-within:ring-brand-100 dark:focus-within:ring-brand-900">
+                            <textarea x-model="commentDraft" rows="2" maxlength="3000"
+                                      @keydown.ctrl.enter.prevent="dodajKomentarz()"
+                                      @keydown.meta.enter.prevent="dodajKomentarz()"
+                                      placeholder="Napisz komentarz…"
+                                      class="w-full resize-y border-0 bg-transparent p-1 text-[13px] leading-relaxed text-ink placeholder:text-faint focus:ring-0"></textarea>
+                            <div class="flex items-center gap-2 border-t border-line pt-2">
+                                <span class="text-[10px] text-faint">Ctrl+Enter wysyła</span>
+                                <button @click="dodajKomentarz()" :disabled="!commentDraft.trim() || commentSaving"
+                                        class="ml-auto rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:bg-surface3 disabled:text-faint">
+                                    <span x-text="commentSaving ? 'Wysyłanie…' : 'Dodaj komentarz'"></span>
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -1338,10 +1604,22 @@ function render_setup_error(string $message): void
 
             /* Osobne pole dodawania w każdej kolumnie tablicy. */
             quick: {
-                todo:  { title: '', assignee_ids: [], priority: 'normal', open: false },
-                doing: { title: '', assignee_ids: [], priority: 'normal', open: false },
-                done:  { title: '', assignee_ids: [], priority: 'normal', open: false }
+                todo:  { title: '', assignee_ids: [], priority: 'normal', due_date: '', open: false },
+                doing: { title: '', assignee_ids: [], priority: 'normal', due_date: '', open: false },
+                done:  { title: '', assignee_ids: [], priority: 'normal', due_date: '', open: false }
             },
+
+            /* 'folder' — zwykły widok folderu, 'mine' — moje zadania zbiorczo. */
+            view: 'folder',
+            mineTasks: [],
+
+            /* Filtry tablicy — działają po stronie przeglądarki, bez zapytań. */
+            filtr: { tekst: '', osoby: [], priorytety: [], tylkoTerminy: false },
+
+            comments: [],
+            commentDraft: '',
+            commentsLoading: false,
+            commentSaving: false,
 
             noteDraft: '',
             noteMode: 'view',
@@ -1357,7 +1635,7 @@ function render_setup_error(string $message): void
             filePickerOpen: false,
             metodaWysylki: null,   // zapamiętana metoda, która działa na tym hostingu
 
-            task: { open: false, id: null, title: '', description: '', status: 'todo', priority: 'normal', assignee_ids: [], saving: false, meta: {} },
+            task: { open: false, id: null, title: '', description: '', status: 'todo', priority: 'normal', due_date: '', assignee_ids: [], saving: false, meta: {} },
             docx: { open: false, name: '', url: '', html: '', loading: false, error: '' },
             ask: { open: false, input: true, title: '', message: '', value: '', confirmText: 'Zapisz', danger: false, onOk: null, submit() {} },
 
@@ -1398,6 +1676,8 @@ function render_setup_error(string $message): void
                     const remembered = Number(localStorage.getItem('panel.folder') || 0);
                     const target = this.folders.find(f => f.id === remembered) || this.folders[0];
                     if (target) await this.loadFolder(target.id);
+
+                    await this.odswiezMoje();
                 } catch (e) {
                     this.toast(e.message, 'error');
                 } finally {
@@ -1440,6 +1720,53 @@ function render_setup_error(string $message): void
 
             get unseen() {
                 return this.activity.filter(a => a.id > this.seenStamp).length;
+            },
+
+            get filtrAktywny() {
+                const f = this.filtr;
+                return f.tekst.trim() !== '' || f.osoby.length > 0 || f.priorytety.length > 0 || f.tylkoTerminy;
+            },
+
+            get mineCount() {
+                return this.mineTasks.length;
+            },
+
+            get mineOverdue() {
+                return this.mineTasks.filter(t => this.terminMinal(t.due_date, t.status)).length;
+            },
+
+            /**
+             * Moje zadania w grupach według pilności terminu — od zaległych
+             * po te bez terminu. Puste grupy nie są pokazywane.
+             */
+            get mineGrouped() {
+                const grupy = [
+                    { klucz: 'po',      etykieta: 'Po terminie',   pilne: true,  zadania: [] },
+                    { klucz: 'dzis',    etykieta: 'Na dziś',       pilne: true,  zadania: [] },
+                    { klucz: 'tydzien', etykieta: 'Najbliższe dni', pilne: false, zadania: [] },
+                    { klucz: 'pozniej', etykieta: 'Później',       pilne: false, zadania: [] },
+                    { klucz: 'brak',    etykieta: 'Bez terminu',   pilne: false, zadania: [] }
+                ];
+
+                for (const t of this.mineTasks) {
+                    const dni = this.dniDoTerminu(t.due_date);
+                    if (dni === null)     grupy[4].zadania.push(t);
+                    else if (dni < 0)     grupy[0].zadania.push(t);
+                    else if (dni === 0)   grupy[1].zadania.push(t);
+                    else if (dni <= 7)    grupy[2].zadania.push(t);
+                    else                  grupy[3].zadania.push(t);
+                }
+
+                const waga = { high: 0, normal: 1, low: 2 };
+                for (const g of grupy) {
+                    g.zadania.sort((a, b) => {
+                        if (a.due_date && b.due_date && a.due_date !== b.due_date) {
+                            return a.due_date < b.due_date ? -1 : 1;
+                        }
+                        return (waga[a.priority] ?? 1) - (waga[b.priority] ?? 1);
+                    });
+                }
+                return grupy.filter(g => g.zadania.length);
             },
 
             /** Załączniki podpięte pod zadanie otwarte w oknie szczegółów. */
@@ -1492,8 +1819,13 @@ function render_setup_error(string $message): void
             /** Wstawia do stanu te fragmenty odpowiedzi, które przyszły z serwera. */
             apply(d) {
                 if (d.folders)  this.folders  = d.folders;
-                if (d.tasks)    this.tasks    = d.tasks;
                 if (d.files)    this.files    = d.files;
+                if (d.tasks) {
+                    this.tasks = d.tasks;
+                    /* Licznik „Moje zadania” w bocznym panelu musi nadążać za
+                       zmianami — odświeżamy go w tle, bez blokowania akcji. */
+                    this.odswiezMoje();
+                }
                 if (d.activity) {
                     this.activity = d.activity;
                     if (d.activity.length) this.stamp = d.activity[0].id;
@@ -1517,6 +1849,9 @@ function render_setup_error(string $message): void
                 this.folders  = d.folders;
                 this.activity = d.activity;
                 this.stamp    = d.stamp;
+
+                await this.odswiezMoje();
+
                 if (this.current) {
                     if (this.folders.some(f => f.id === this.current.id)) {
                         await this.loadFolder(this.current.id, true);
@@ -1553,10 +1888,139 @@ function render_setup_error(string $message): void
             },
 
             async selectFolder(id) {
-                if (this.current && this.current.id === id) { this.sidebarOpen = false; return; }
+                const tenSam = this.view === 'folder' && this.current && this.current.id === id;
+                this.view = 'folder';
+                if (tenSam) { this.sidebarOpen = false; return; }
                 if (this.noteDirty) await this.saveNote(true);
                 await this.loadFolder(id);
                 this.sidebarOpen = false;
+            },
+
+            /* ------------------- widok „Moje zadania” --------------------- */
+
+            async pokazMoje() {
+                this.view = 'mine';
+                this.sidebarOpen = false;
+                if (this.noteDirty) await this.saveNote(true);
+                await this.odswiezMoje();
+            },
+
+            async odswiezMoje(quiet = true) {
+                try {
+                    const d = await this.api('task.mine');
+                    this.mineTasks = d.tasks;
+                } catch (e) {
+                    if (!quiet) this.toast(e.message, 'error');
+                }
+            },
+
+            /**
+             * Zadanie z listy zbiorczej otwieramy w jego własnym folderze —
+             * dzięki temu okno ma komplet kontekstu (załączniki, komentarze).
+             */
+            async otworzZMoich(t) {
+                this.view = 'folder';
+                await this.loadFolder(t.folder_id);
+                const swieze = this.tasks.find(x => x.id === t.id);
+                if (swieze) {
+                    this.tab = 'board';
+                    this.openTask(swieze);
+                } else {
+                    this.toast('Tego zadania już nie ma.', 'error');
+                }
+            },
+
+            /* --------------------- terminy wykonania ---------------------- */
+
+            /** Data w formacie RRRR-MM-DD, przesunięta o podaną liczbę dni. */
+            dataZa(dni) {
+                const d = new Date();
+                d.setHours(12, 0, 0, 0);
+                d.setDate(d.getDate() + dni);
+                return d.getFullYear() + '-'
+                    + String(d.getMonth() + 1).padStart(2, '0') + '-'
+                    + String(d.getDate()).padStart(2, '0');
+            },
+
+            /** Ile dni dzieli nas od terminu: 0 = dziś, ujemne = po terminie. */
+            dniDoTerminu(data) {
+                if (!data) return null;
+                const cel = new Date(data + 'T12:00:00');
+                if (isNaN(cel)) return null;
+                const dzis = new Date();
+                dzis.setHours(12, 0, 0, 0);
+                return Math.round((cel - dzis) / 86400000);
+            },
+
+            /** Czy termin minął. Zrobione zadania nigdy nie są spóźnione. */
+            terminMinal(data, status) {
+                if (status === 'done') return false;
+                const dni = this.dniDoTerminu(data);
+                return dni !== null && dni < 0;
+            },
+
+            fmtData(data) {
+                const dni = this.dniDoTerminu(data);
+                if (dni === null) return '—';
+                return new Date(data + 'T12:00:00')
+                    .toLocaleDateString('pl-PL', { day: '2-digit', month: '2-digit', year: 'numeric' });
+            },
+
+            /** Krótka etykieta na kartę: „dziś”, „za 3 dni”, „5 dni po terminie”. */
+            terminEtykieta(data, status) {
+                const dni = this.dniDoTerminu(data);
+                if (dni === null) return '';
+
+                /* Zrobionego zadania nie straszymy zaległością — pokazujemy
+                   samą datę, żeby było wiadomo, na kiedy było planowane. */
+                if (status === 'done') {
+                    return new Date(data + 'T12:00:00').toLocaleDateString('pl-PL', { day: 'numeric', month: 'short' });
+                }
+
+                if (dni === 0)  return 'dziś';
+                if (dni === 1)  return 'jutro';
+                if (dni === -1) return 'wczoraj';
+                if (dni < 0)    return this.odmianaDni(-dni) + ' po terminie';
+                if (dni <= 7)   return 'za ' + this.odmianaDni(dni);
+                return new Date(data + 'T12:00:00').toLocaleDateString('pl-PL', { day: 'numeric', month: 'short' });
+            },
+
+            /** Pełny opis pod polem daty w oknie zadania. */
+            terminOpis(data) {
+                const dni = this.dniDoTerminu(data);
+                if (dni === null) return '';
+                const pelna = this.fmtData(data);
+                if (dni === 0)  return pelna + ' — termin mija dzisiaj';
+                if (dni < 0)    return pelna + ' — ' + this.odmianaDni(-dni) + ' po terminie';
+                return pelna + ' — zostało ' + this.odmianaDni(dni);
+            },
+
+            odmianaDni(n) {
+                return n === 1 ? '1 dzień' : n + ' dni';
+            },
+
+            /** Kolory plakietki terminu: czerwony po terminie, bursztyn na dziś. */
+            terminStyle(data, status) {
+                const dni = this.dniDoTerminu(data);
+                if (dni === null) return '';
+
+                let paleta;
+                if (status === 'done') {
+                    paleta = { jasny: ['#f1f5f9', '#475569'], ciemny: ['#334155', '#cbd5e1'] };
+                } else if (dni < 0) {
+                    paleta = { jasny: ['#fef2f2', '#b91c1c'], ciemny: ['#450a0a', '#fca5a5'] };
+                } else if (dni <= 1) {
+                    paleta = { jasny: ['#fffbeb', '#b45309'], ciemny: ['#451a03', '#fcd34d'] };
+                } else {
+                    paleta = { jasny: ['#f1f5f9', '#475569'], ciemny: ['#334155', '#cbd5e1'] };
+                }
+                const [tlo, tekst] = this.dark ? paleta.ciemny : paleta.jasny;
+                return 'background:' + tlo + ';color:' + tekst;
+            },
+
+            kolumnaEtykieta(status) {
+                const col = this.columns.find(c => c.key === status);
+                return col ? col.label : status;
             },
 
             newFolder() {
@@ -1652,17 +2116,66 @@ function render_setup_error(string $message): void
             },
 
             /* --------------------------- zadania -------------------------- */
+            /** Czy zadanie przechodzi przez aktywne filtry tablicy. */
+            pasujeDoFiltrow(t) {
+                const f = this.filtr;
+
+                if (f.osoby.length && !t.assignees.some(a => f.osoby.includes(a.id))) return false;
+                if (f.priorytety.length && !f.priorytety.includes(t.priority)) return false;
+                if (f.tylkoTerminy && !t.due_date) return false;
+
+                const szukane = f.tekst.trim().toLowerCase();
+                if (szukane) {
+                    const stog = (t.title + ' ' + (t.description || '')).toLowerCase();
+                    if (!stog.includes(szukane)) return false;
+                }
+                return true;
+            },
+
             tasksIn(status) {
                 const waga = { high: 0, normal: 1, low: 2 };
-                const list = this.tasks.filter(t => t.status === status);
+                const list = this.tasks.filter(t => t.status === status && this.pasujeDoFiltrow(t));
+
                 list.sort((a, b) => {
+                    /* Zadania po terminie idą na samą górę — to najpilniejsza informacja. */
+                    const spozA = this.terminMinal(a.due_date, a.status) ? 0 : 1;
+                    const spozB = this.terminMinal(b.due_date, b.status) ? 0 : 1;
+                    if (spozA !== spozB) return spozA - spozB;
+
                     const roznica = (waga[a.priority] ?? 1) - (waga[b.priority] ?? 1);
                     if (roznica !== 0) return roznica;
+
+                    /* Przy równym priorytecie decyduje bliższy termin. */
+                    if (a.due_date && b.due_date && a.due_date !== b.due_date) {
+                        return a.due_date < b.due_date ? -1 : 1;
+                    }
+                    if (a.due_date && !b.due_date) return -1;
+                    if (!a.due_date && b.due_date) return 1;
+
                     return status === 'done'
                         ? String(b.updated_at || '').localeCompare(String(a.updated_at || ''))
                         : a.id - b.id;
                 });
                 return list;
+            },
+
+            przelaczFiltrOsoby(id) {
+                const i = this.filtr.osoby.indexOf(id);
+                if (i === -1) this.filtr.osoby.push(id);
+                else this.filtr.osoby.splice(i, 1);
+            },
+
+            przelaczFiltrPriorytetu(key) {
+                const i = this.filtr.priorytety.indexOf(key);
+                if (i === -1) this.filtr.priorytety.push(key);
+                else this.filtr.priorytety.splice(i, 1);
+            },
+
+            wyczyscFiltry() {
+                this.filtr.tekst = '';
+                this.filtr.osoby = [];
+                this.filtr.priorytety = [];
+                this.filtr.tylkoTerminy = false;
             },
 
             /** Kliknięcie w awatar dodaje albo usuwa osobę z listy. */
@@ -1689,6 +2202,7 @@ function render_setup_error(string $message): void
                         title,
                         status,
                         priority: pole.priority,
+                        due_date: pole.due_date || null,
                         assignee_ids: pole.assignee_ids.slice()
                     }, 'POST'));
                     pole.title = '';
@@ -1704,6 +2218,7 @@ function render_setup_error(string $message): void
                     description: t.description || '',
                     status: t.status,
                     priority: t.priority || 'normal',
+                    due_date: t.due_date || '',
                     assignee_ids: (t.assignees || []).map(a => a.id),
                     saving: false,
                     meta: {
@@ -1713,6 +2228,57 @@ function render_setup_error(string $message): void
                         updated_at: t.updated_at
                     }
                 };
+
+                this.comments = [];
+                this.commentDraft = '';
+                this.wczytajKomentarze(t.id);
+            },
+
+            /* ------------------------- komentarze ------------------------- */
+
+            async wczytajKomentarze(taskId) {
+                this.commentsLoading = true;
+                try {
+                    const d = await this.api('comment.list', null, 'GET', '&task_id=' + encodeURIComponent(taskId));
+                    /* Okno mogło się w międzyczasie przełączyć na inne zadanie. */
+                    if (this.task.id === taskId) this.comments = d.comments;
+                } catch (e) {
+                    if (this.task.id === taskId) this.toast(e.message, 'error');
+                } finally {
+                    this.commentsLoading = false;
+                }
+            },
+
+            async dodajKomentarz() {
+                const tresc = this.commentDraft.trim();
+                if (!tresc || !this.task.id || this.commentSaving) return;
+
+                this.commentSaving = true;
+                try {
+                    const d = await this.api('comment.add', { task_id: this.task.id, body: tresc }, 'POST');
+                    this.comments = d.comments;
+                    this.commentDraft = '';
+                    this.apply(d);
+                } catch (e) {
+                    this.toast(e.message, 'error');
+                } finally {
+                    this.commentSaving = false;
+                }
+            },
+
+            usunKomentarz(k) {
+                this.confirm({
+                    title: 'Usunąć komentarz?',
+                    message: 'Twoja wypowiedź zniknie z dyskusji na stałe.',
+                    confirmText: 'Usuń',
+                    onOk: async () => {
+                        try {
+                            const d = await this.api('comment.delete', { id: k.id }, 'POST');
+                            this.comments = d.comments;
+                            this.apply(d);
+                        } catch (e) { this.toast(e.message, 'error'); }
+                    }
+                });
             },
 
             async saveTask() {
@@ -1725,6 +2291,7 @@ function render_setup_error(string $message): void
                         description: this.task.description,
                         status: this.task.status,
                         priority: this.task.priority,
+                        due_date: this.task.due_date || null,
                         assignee_ids: this.task.assignee_ids.slice()
                     }, 'POST'));
                     this.task.open = false;

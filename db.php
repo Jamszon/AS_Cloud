@@ -21,7 +21,7 @@ const ACTIVITY_LIMIT   = 20;             // ile wpisów pokazuje dziennik zmian
 const ACTIVITY_KEEP    = 500;            // ile wpisów trzymamy w bazie
 const LOGIN_MAX_FAILS  = 8;              // blokada logowania po N nieudanych próbach
 const LOGIN_LOCK_MIN   = 15;             // ...na ile minut
-const SCHEMA_VERSION   = 3;
+const SCHEMA_VERSION   = 4;
 
 /* Żaden komunikat PHP nie może trafić do odpowiedzi: zepsułby JSON API,
    a przy okazji uniemożliwił wysłanie nagłówków sesji. Błędy idą do logu.
@@ -348,6 +348,22 @@ function migrate_schema(PDO $pdo, int $from): void
         add_column($pdo, 'files', 'task_id', 'INTEGER');
         $pdo->exec('CREATE INDEX IF NOT EXISTS idx_files_task ON files(task_id)');
     }
+
+    /* v3 -> v4: termin wykonania zadania oraz komentarze pod zadaniem. */
+    if ($from < 4) {
+        add_column($pdo, 'tasks', 'due_date', 'TEXT');
+
+        $pdo->exec(
+            'CREATE TABLE IF NOT EXISTS task_comments (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                task_id    INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+                user_id    INTEGER NOT NULL REFERENCES users(id),
+                body       TEXT    NOT NULL,
+                created_at TEXT    NOT NULL
+            )'
+        );
+        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_comments_task ON task_comments(task_id)');
+    }
 }
 
 function schema_sql(): string
@@ -378,6 +394,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     description TEXT    NOT NULL DEFAULT '',
     status      TEXT    NOT NULL DEFAULT 'todo',
     priority    TEXT    NOT NULL DEFAULT 'normal',
+    due_date    TEXT,
     assignee_id INTEGER REFERENCES users(id),
     created_by  INTEGER NOT NULL REFERENCES users(id),
     created_at  TEXT    NOT NULL,
@@ -410,6 +427,17 @@ CREATE TABLE IF NOT EXISTS task_assignees (
     user_id INTEGER NOT NULL REFERENCES users(id),
     PRIMARY KEY (task_id, user_id)
 );
+
+-- Dyskusja pod zadaniem, oddzielona od opisu.
+CREATE TABLE IF NOT EXISTS task_comments (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id    INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    user_id    INTEGER NOT NULL REFERENCES users(id),
+    body       TEXT    NOT NULL,
+    created_at TEXT    NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_comments_task ON task_comments(task_id);
 
 CREATE TABLE IF NOT EXISTS activity (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -686,6 +714,30 @@ function clean_text(string $value, int $max = 50000): string
     $value = str_replace(["\r\n", "\r"], "\n", utf8($value));
     $value = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/u', '', $value);
     return mb_substr((string)$value, 0, $max);
+}
+
+/**
+ * Sprawdza datę w formacie RRRR-MM-DD. Zwraca ją albo null (brak terminu).
+ * Rzuca ApiError przy wartości, która datą nie jest — lepiej powiedzieć
+ * wprost, niż po cichu wyczyścić komuś termin.
+ */
+function clean_date($value): ?string
+{
+    if ($value === null || $value === '' || $value === false) {
+        return null;
+    }
+    $value = trim((string)$value);
+    if ($value === '') {
+        return null;
+    }
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $value)) {
+        throw new ApiError('Termin musi być datą w formacie RRRR-MM-DD.');
+    }
+    [$rok, $miesiac, $dzien] = array_map('intval', explode('-', $value));
+    if (!checkdate($miesiac, $dzien, $rok)) {
+        throw new ApiError('Podana data nie istnieje w kalendarzu.');
+    }
+    return $value;
 }
 
 /** Zapisuje szczegóły błędu do data/error.log i zwraca krótki identyfikator. */

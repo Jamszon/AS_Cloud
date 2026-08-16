@@ -93,6 +93,7 @@ function route(string $action): array
     $writes = [
         'folder.create', 'folder.rename', 'folder.delete', 'folder.reorder',
         'task.create', 'task.update', 'task.delete',
+        'comment.add', 'comment.delete',
         'note.save', 'file.upload', 'file.chunk', 'file.delete', 'file.assign',
     ];
     if (in_array($action, $writes, true)) {
@@ -119,6 +120,11 @@ function route(string $action): array
         case 'task.create':   return action_task_create($me);
         case 'task.update':   return action_task_update($me);
         case 'task.delete':   return action_task_delete($me);
+        case 'task.mine':     return action_task_mine($me);
+
+        case 'comment.list':   return action_comment_list();
+        case 'comment.add':    return action_comment_add($me);
+        case 'comment.delete': return action_comment_delete($me);
 
         case 'note.save':     return action_note_save($me);
 
@@ -217,6 +223,8 @@ function action_folder_delete(array $me): array
     /* Kasujemy jawnie — nie każdy build SQLite ma włączone klucze obce. */
     db()->prepare('DELETE FROM task_assignees WHERE task_id IN (SELECT id FROM tasks WHERE folder_id = ?)')
         ->execute([$folder['id']]);
+    db()->prepare('DELETE FROM task_comments WHERE task_id IN (SELECT id FROM tasks WHERE folder_id = ?)')
+        ->execute([$folder['id']]);
     db()->prepare('DELETE FROM files   WHERE folder_id = ?')->execute([$folder['id']]);
     db()->prepare('DELETE FROM tasks   WHERE folder_id = ?')->execute([$folder['id']]);
     db()->prepare('DELETE FROM notes   WHERE folder_id = ?')->execute([$folder['id']]);
@@ -283,14 +291,15 @@ function action_task_create(array $me): array
     if (!in_array($priority, PRIORITIES, true)) {
         $priority = 'normal';
     }
+    $termin = clean_date(body()['due_date'] ?? null);
 
     $stmt = db()->prepare(
-        'INSERT INTO tasks (folder_id, title, description, status, priority, created_by, created_at, updated_by, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        'INSERT INTO tasks (folder_id, title, description, status, priority, due_date, created_by, created_at, updated_by, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
     );
     $stmt->execute([
         $folder['id'], $title, clean_text((string)(body()['description'] ?? ''), 5000),
-        $status, $priority, $me['id'], now(), $me['id'], now(),
+        $status, $priority, $termin, $me['id'], now(), $me['id'], now(),
     ]);
     set_task_assignees((int)db()->lastInsertId(), $osoby);
 
@@ -334,6 +343,9 @@ function action_task_update(array $me): array
             throw new ApiError('Nieznany priorytet zadania.');
         }
         $changes['priority'] = $priority;
+    }
+    if (array_key_exists('due_date', $body)) {
+        $changes['due_date'] = clean_date($body['due_date']);
     }
     /* Lista osób trzymana jest w osobnej tabeli, więc obsługujemy ją oddzielnie. */
     $osobyPrzed = task_assignee_ids((int)$task['id']);
@@ -379,6 +391,11 @@ function action_task_update(array $me): array
     } elseif (isset($changes['priority']) && $changes['priority'] !== ($task['priority'] ?? 'normal')) {
         $action  = 'task.priority';
         $message = 'Priorytet zadania „' . $title . '”: ' . priority_label($changes['priority']);
+    } elseif (array_key_exists('due_date', $changes) && $changes['due_date'] !== ($task['due_date'] ?? null)) {
+        $action  = 'task.due';
+        $message = $changes['due_date'] === null
+            ? 'Zdjęty termin zadania „' . $title . '”'
+            : 'Termin zadania „' . $title . '”: ' . date('j.m.Y', (int)strtotime($changes['due_date']));
     } else {
         $action  = 'task.update';
         $message = 'Edycja zadania: „' . $title . '”';
@@ -406,6 +423,7 @@ function action_task_delete(array $me): array
 
     db()->prepare('UPDATE files SET task_id = NULL WHERE task_id = ?')->execute([$task['id']]);
     db()->prepare('DELETE FROM task_assignees WHERE task_id = ?')->execute([$task['id']]);
+    db()->prepare('DELETE FROM task_comments WHERE task_id = ?')->execute([$task['id']]);
     db()->prepare('DELETE FROM tasks WHERE id = ?')->execute([$task['id']]);
 
     log_activity($me['id'], 'task.delete', 'Usunięte zadanie: „' . $task['title'] . '”', $folder['id'], $folder['name']);
@@ -418,6 +436,134 @@ function action_task_delete(array $me): array
         'folders'    => folders_with_counts(),
         'activity'   => activity_feed(),
     ];
+}
+
+/**
+ * Zadania przypisane do zalogowanej osoby — ze wszystkich folderów naraz.
+ * Zrobione pomijamy: ten widok ma odpowiadać na pytanie „co mam do zrobienia”.
+ */
+function action_task_mine(array $me): array
+{
+    $stmt = db()->prepare(
+        'SELECT t.*, f.name AS folder_name,
+                cu.name AS created_by_name,
+                uu.name AS updated_by_name
+         FROM tasks t
+         JOIN task_assignees ta ON ta.task_id = t.id AND ta.user_id = ?
+         JOIN folders f ON f.id = t.folder_id
+         LEFT JOIN users cu ON cu.id = t.created_by
+         LEFT JOIN users uu ON uu.id = t.updated_by
+         WHERE t.status <> \'done\'
+         ORDER BY f.position, t.id'
+    );
+    $stmt->execute([$me['id']]);
+    $rows = $stmt->fetchAll();
+
+    $ids = [];
+    foreach ($rows as $row) {
+        $ids[] = (int)$row['id'];
+    }
+
+    $osoby      = assignees_for_tasks($ids);
+    $zalaczniki = counts_for_tasks($ids, 'files', 'task_id');
+    $komentarze = counts_for_tasks($ids, 'task_comments', 'task_id');
+
+    $out = [];
+    foreach ($rows as $row) {
+        $out[] = map_task_row($row, $osoby, $zalaczniki, $komentarze) + [
+            'folder_name' => $row['folder_name'],
+        ];
+    }
+
+    return ['ok' => true, 'tasks' => $out];
+}
+
+/* ================================================================== *
+ *  AKCJE — komentarze pod zadaniem
+ * ================================================================== */
+
+function action_comment_list(): array
+{
+    $task = task_or_fail((int)($_GET['task_id'] ?? 0));
+    return ['ok' => true, 'comments' => task_comments((int)$task['id'])];
+}
+
+function action_comment_add(array $me): array
+{
+    $task = task_or_fail((int)(body()['task_id'] ?? 0));
+    $body = clean_text((string)(body()['body'] ?? ''), 3000);
+
+    if (trim($body) === '') {
+        throw new ApiError('Napisz treść komentarza.');
+    }
+
+    db()->prepare('INSERT INTO task_comments (task_id, user_id, body, created_at) VALUES (?, ?, ?, ?)')
+        ->execute([$task['id'], $me['id'], $body, now()]);
+
+    $folder = folder_or_fail((int)$task['folder_id']);
+    log_activity($me['id'], 'comment.add', 'Komentarz do zadania „' . $task['title'] . '”',
+        $folder['id'], $folder['name']);
+
+    return [
+        'ok'       => true,
+        'comments' => task_comments((int)$task['id']),
+        'tasks'    => folder_tasks($folder['id']),
+        'activity' => activity_feed(),
+    ];
+}
+
+/**
+ * Komentarz może skasować tylko jego autor. Przy czterech zaufanych osobach
+ * to nie kwestia uprawnień, tylko tego, żeby nikt nie zmieniał cudzej
+ * wypowiedzi w dyskusji.
+ */
+function action_comment_delete(array $me): array
+{
+    $stmt = db()->prepare('SELECT * FROM task_comments WHERE id = ?');
+    $stmt->execute([(int)(body()['id'] ?? 0)]);
+    $comment = $stmt->fetch();
+    if (!$comment) {
+        throw new ApiError('Ten komentarz już nie istnieje.', 404);
+    }
+    if ((int)$comment['user_id'] !== (int)$me['id']) {
+        throw new ApiError('Możesz usuwać tylko własne komentarze.', 403);
+    }
+
+    $task   = task_or_fail((int)$comment['task_id']);
+    $folder = folder_or_fail((int)$task['folder_id']);
+
+    db()->prepare('DELETE FROM task_comments WHERE id = ?')->execute([(int)$comment['id']]);
+
+    return [
+        'ok'       => true,
+        'comments' => task_comments((int)$task['id']),
+        'tasks'    => folder_tasks($folder['id']),
+    ];
+}
+
+function task_comments(int $taskId): array
+{
+    $stmt = db()->prepare(
+        'SELECT c.id, c.body, c.created_at, c.user_id, u.name AS user_name, u.color AS user_color
+         FROM task_comments c
+         JOIN users u ON u.id = c.user_id
+         WHERE c.task_id = ?
+         ORDER BY c.id'
+    );
+    $stmt->execute([$taskId]);
+
+    $out = [];
+    foreach ($stmt->fetchAll() as $row) {
+        $out[] = [
+            'id'         => (int)$row['id'],
+            'user_id'    => (int)$row['user_id'],
+            'user_name'  => $row['user_name'],
+            'user_color' => $row['user_color'],
+            'body'       => $row['body'],
+            'at'         => iso($row['created_at']),
+        ];
+    }
+    return $out;
 }
 
 /* ================================================================== *
@@ -1066,54 +1212,88 @@ function folder_tasks(int $folderId): array
     $stmt->execute([$folderId]);
     $rows = $stmt->fetchAll();
 
-    /* Osoby przypisane do zadań pobieramy jednym zapytaniem dla całego folderu. */
-    $osoby = [];
+    $ids = [];
+    foreach ($rows as $row) {
+        $ids[] = (int)$row['id'];
+    }
+
+    $osoby      = assignees_for_tasks($ids);
+    $zalaczniki = counts_for_tasks($ids, 'files', 'task_id');
+    $komentarze = counts_for_tasks($ids, 'task_comments', 'task_id');
+
+    $out = [];
+    foreach ($rows as $row) {
+        $out[] = map_task_row($row, $osoby, $zalaczniki, $komentarze);
+    }
+    return $out;
+}
+
+/** Wiersz zadania z bazy => kształt oczekiwany przez interfejs. */
+function map_task_row(array $row, array $osoby, array $zalaczniki, array $komentarze): array
+{
+    $id = (int)$row['id'];
+    return [
+        'id'               => $id,
+        'folder_id'        => (int)$row['folder_id'],
+        'title'            => $row['title'],
+        'description'      => $row['description'],
+        'status'           => $row['status'],
+        'priority'         => $row['priority'] ?? 'normal',
+        'due_date'         => (isset($row['due_date']) && $row['due_date'] !== '') ? $row['due_date'] : null,
+        'assignees'        => $osoby[$id] ?? [],
+        'file_count'       => $zalaczniki[$id] ?? 0,
+        'comment_count'    => $komentarze[$id] ?? 0,
+        'created_by_name'  => $row['created_by_name'] ?? null,
+        'created_by_color' => $row['created_by_color'] ?? null,
+        'created_at'       => iso($row['created_at']),
+        'updated_by_name'  => $row['updated_by_name'] ?? null,
+        'updated_at'       => iso($row['updated_at']),
+    ];
+}
+
+/** Osoby przypisane do wskazanych zadań — jednym zapytaniem. */
+function assignees_for_tasks(array $taskIds): array
+{
+    if (!$taskIds) {
+        return [];
+    }
+    $miejsca = implode(',', array_fill(0, count($taskIds), '?'));
     $stmt = db()->prepare(
         'SELECT ta.task_id, u.id, u.name, u.color
          FROM task_assignees ta
          JOIN users u ON u.id = ta.user_id
-         JOIN tasks t ON t.id = ta.task_id
-         WHERE t.folder_id = ?
+         WHERE ta.task_id IN (' . $miejsca . ')
          ORDER BY u.id'
     );
-    $stmt->execute([$folderId]);
+    $stmt->execute($taskIds);
+
+    $out = [];
     foreach ($stmt->fetchAll() as $row) {
-        $osoby[(int)$row['task_id']][] = [
+        $out[(int)$row['task_id']][] = [
             'id'    => (int)$row['id'],
             'name'  => $row['name'],
             'color' => $row['color'],
         ];
     }
+    return $out;
+}
 
-    /* Podobnie liczba załączników podpiętych pod poszczególne zadania. */
-    $zalaczniki = [];
-    $stmt = db()->prepare(
-        'SELECT task_id, COUNT(*) AS ile FROM files
-         WHERE folder_id = ? AND task_id IS NOT NULL GROUP BY task_id'
-    );
-    $stmt->execute([$folderId]);
-    foreach ($stmt->fetchAll() as $row) {
-        $zalaczniki[(int)$row['task_id']] = (int)$row['ile'];
+/** Zliczenia powiązanych rekordów (załączniki, komentarze) dla zadań. */
+function counts_for_tasks(array $taskIds, string $table, string $column): array
+{
+    if (!$taskIds) {
+        return [];
     }
+    $miejsca = implode(',', array_fill(0, count($taskIds), '?'));
+    $stmt = db()->prepare(
+        'SELECT ' . $column . ' AS tid, COUNT(*) AS ile FROM ' . $table . '
+         WHERE ' . $column . ' IN (' . $miejsca . ') GROUP BY ' . $column
+    );
+    $stmt->execute($taskIds);
 
     $out = [];
-    foreach ($rows as $row) {
-        $id = (int)$row['id'];
-        $out[] = [
-            'id'               => $id,
-            'folder_id'        => (int)$row['folder_id'],
-            'title'            => $row['title'],
-            'description'      => $row['description'],
-            'status'           => $row['status'],
-            'priority'         => $row['priority'] ?? 'normal',
-            'assignees'        => $osoby[$id] ?? [],
-            'file_count'       => $zalaczniki[$id] ?? 0,
-            'created_by_name'  => $row['created_by_name'],
-            'created_by_color' => $row['created_by_color'],
-            'created_at'       => iso($row['created_at']),
-            'updated_by_name'  => $row['updated_by_name'],
-            'updated_at'       => iso($row['updated_at']),
-        ];
+    foreach ($stmt->fetchAll() as $row) {
+        $out[(int)$row['tid']] = (int)$row['ile'];
     }
     return $out;
 }
