@@ -1205,6 +1205,9 @@ function folder_files(int $folderId): array
             'preview'            => in_array($row['ext'], ['png', 'jpg', 'jpeg', 'pdf'], true)
                 ? 'api.php?action=download&inline=1&id=' . (int)$row['id']
                 : null,
+            /* Dokumenty Worda przeglądarka pokazuje dopiero po przerobieniu
+               na HTML — robi to panel, w oknie podglądu. */
+            'viewer'             => $row['ext'] === 'docx' ? 'docx' : null,
         ];
     }
     return $out;

@@ -186,7 +186,20 @@ data i godzina”. Pusta notatka otwiera się od razu w trybie edycji.
 
 **Pliki** — przeciągnij na pole lub kliknij, żeby wybrać. Dozwolone:
 `PDF, PNG, JPG, JPEG, ZIP, DOCX`, do 15 MB na plik. Przy każdym załączniku
-widać rozmiar, autora i datę; obrazy oraz PDF-y mają podgląd w nowej karcie.
+widać rozmiar, autora i datę.
+
+Podgląd (ikona oka) działa dla:
+
+- **obrazów i PDF-ów** — otwierają się w nowej karcie,
+- **dokumentów Worda (`.docx`)** — otwierają się w oknie panelu.
+
+Podgląd `.docx` pokazuje tekst z zachowaniem nagłówków, list, tabel,
+pogrubienia i kursywy. Nie odtwarza obrazów ani układu strony — od tego jest
+Word, a plik zawsze można pobrać przyciskiem obok. Konwersja odbywa się
+**w przeglądarce**: dokument nie jest nigdzie wysyłany ani przetwarzany przez
+usługi zewnętrzne. Panel czyta archiwum `.docx` samodzielnie i rozpakowuje je
+wbudowanym w przeglądarkę mechanizmem, więc nie potrzebuje żadnej dodatkowej
+biblioteki z internetu.
 
 **Tryb jasny i ciemny** — przełącznik (słońce / księżyc) w prawym górnym rogu,
 obok dzwonka. Wybór zapisuje się w przeglądarce i obowiązuje przy kolejnych

@@ -923,10 +923,16 @@ function render_setup_error(string $message): void
 
                                 <div class="flex shrink-0 items-center gap-1">
                                     <template x-if="f.preview">
-                                        <a :href="f.preview" target="_blank" rel="noopener" title="Podgląd"
+                                        <a :href="f.preview" target="_blank" rel="noopener" title="Podgląd w nowej karcie"
                                            class="rounded-lg p-2 text-faint transition hover:bg-surface3 hover:text-brand-600">
                                             <?= icon('eye', 'h-[18px] w-[18px]') ?>
                                         </a>
+                                    </template>
+                                    <template x-if="f.viewer === 'docx'">
+                                        <button @click="pokazDocx(f)" title="Podgląd dokumentu Worda"
+                                                class="rounded-lg p-2 text-faint transition hover:bg-surface3 hover:text-brand-600">
+                                            <?= icon('eye', 'h-[18px] w-[18px]') ?>
+                                        </button>
                                     </template>
                                     <a :href="f.url" title="Pobierz"
                                        class="rounded-lg p-2 text-faint transition hover:bg-surface3 hover:text-brand-600">
@@ -1095,6 +1101,18 @@ function render_setup_error(string $message): void
                                         <span x-text="f.uploaded_by_name"></span>, <span x-text="fmtShort(f.uploaded_at)"></span>
                                     </p>
                                 </div>
+                                <template x-if="f.viewer === 'docx'">
+                                    <button @click="pokazDocx(f)" title="Podgląd dokumentu Worda"
+                                            class="rounded-lg p-1.5 text-faint transition hover:bg-surface3 hover:text-brand-600">
+                                        <?= icon('eye', 'h-4 w-4') ?>
+                                    </button>
+                                </template>
+                                <template x-if="f.preview">
+                                    <a :href="f.preview" target="_blank" rel="noopener" title="Podgląd w nowej karcie"
+                                       class="rounded-lg p-1.5 text-faint transition hover:bg-surface3 hover:text-brand-600">
+                                        <?= icon('eye', 'h-4 w-4') ?>
+                                    </a>
+                                </template>
                                 <a :href="f.url" title="Pobierz" class="rounded-lg p-1.5 text-faint transition hover:bg-surface3 hover:text-brand-600">
                                     <?= icon('download', 'h-4 w-4') ?>
                                 </a>
@@ -1191,6 +1209,50 @@ function render_setup_error(string $message): void
                     <span x-text="task.saving ? 'Zapisywanie…' : 'Zapisz'"></span>
                 </button>
             </footer>
+        </div>
+    </div>
+
+    <!-- ==================== PODGLĄD DOKUMENTU WORDA ==================== -->
+    <div x-show="docx.open" x-cloak class="fixed inset-0 z-[56] grid place-items-end sm:place-items-center">
+        <div x-show="docx.open" x-transition.opacity @click="docx.open = false" class="absolute inset-0 bg-slate-900/50"></div>
+
+        <div x-show="docx.open"
+             x-transition:enter="transition duration-200 ease-out" x-transition:enter-start="translate-y-6 opacity-0 sm:scale-95" x-transition:enter-end="translate-y-0 opacity-100 sm:scale-100"
+             class="relative m-0 flex max-h-[92vh] w-full flex-col overflow-hidden rounded-t-3xl bg-surface shadow-lift sm:m-4 sm:max-w-3xl sm:rounded-3xl">
+
+            <header class="flex items-center gap-3 border-b border-line px-5 py-4">
+                <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-[10px] font-bold uppercase"
+                      :style="fileBadge('docx')">docx</span>
+                <div class="min-w-0 flex-1">
+                    <h2 class="truncate text-sm font-semibold text-ink" x-text="docx.name"></h2>
+                    <p class="text-[11px] text-faint">Podgląd treści — bez obrazów i zaawansowanego formatowania</p>
+                </div>
+                <a :href="docx.url" title="Pobierz oryginał"
+                   class="rounded-lg p-2 text-faint transition hover:bg-surface3 hover:text-brand-600">
+                    <?= icon('download', 'h-[18px] w-[18px]') ?>
+                </a>
+                <button @click="docx.open = false" class="rounded-lg p-2 text-faint hover:bg-surface3" aria-label="Zamknij">
+                    <?= icon('close', 'h-[18px] w-[18px]') ?>
+                </button>
+            </header>
+
+            <div class="thin-scroll min-h-0 flex-1 overflow-y-auto p-5 sm:p-7">
+                <div x-show="docx.loading" class="flex flex-col items-center gap-3 py-16">
+                    <div class="h-8 w-8 animate-spin rounded-full border-[3px] border-brand-200 border-t-brand-600"></div>
+                    <p class="text-sm text-faint">Przetwarzanie dokumentu…</p>
+                </div>
+
+                <div x-show="docx.error" x-cloak
+                     class="rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
+                    <p x-text="docx.error"></p>
+                    <p class="mt-1.5 text-[13px] opacity-80">Plik możesz zawsze pobrać i otworzyć w Wordzie.</p>
+                </div>
+
+                <div x-show="!docx.loading && !docx.error"
+                     :class="dark ? 'prose-invert' : ''"
+                     class="prose prose-sm prose-slate max-w-none prose-headings:font-semibold prose-a:text-brand-500 prose-img:rounded-lg prose-table:text-[13px]"
+                     x-html="docx.html"></div>
+            </div>
         </div>
     </div>
 
@@ -1296,6 +1358,7 @@ function render_setup_error(string $message): void
             metodaWysylki: null,   // zapamiętana metoda, która działa na tym hostingu
 
             task: { open: false, id: null, title: '', description: '', status: 'todo', priority: 'normal', assignee_ids: [], saving: false, meta: {} },
+            docx: { open: false, name: '', url: '', html: '', loading: false, error: '' },
             ask: { open: false, input: true, title: '', message: '', value: '', confirmText: 'Zapisz', danger: false, onOk: null, submit() {} },
 
             columns: [
@@ -2070,6 +2133,270 @@ function render_setup_error(string $message): void
                 } catch (e) { this.toast(e.message, 'error'); }
             },
 
+            /* ------------------- podgląd dokumentu Worda ------------------- */
+
+            /**
+             * Zamienia .docx na HTML w przeglądarce. Plik pobieramy z naszego
+             * serwera (po sprawdzeniu sesji) i przerabiamy lokalnie — dokument
+             * nigdzie nie jest wysyłany.
+             */
+            async pokazDocx(file) {
+                this.docx = { open: true, name: file.name, url: file.url, html: '', loading: true, error: '' };
+                try {
+                    const odpowiedz = await fetch(file.url, { credentials: 'same-origin' });
+                    if (!odpowiedz.ok) {
+                        throw new Error('Nie udało się pobrać pliku z serwera (HTTP ' + odpowiedz.status + ').');
+                    }
+
+                    const xml = await this.wyjmijTrescDocx(await odpowiedz.arrayBuffer());
+                    const czysty = this.oczyscHtml(this.docxNaHtml(xml));
+
+                    this.docx.html = czysty.trim()
+                        ? czysty
+                        : '<p class="text-faint">Ten dokument nie zawiera tekstu możliwego do wyświetlenia.</p>';
+                } catch (e) {
+                    this.docx.error = e.message || 'Nie udało się otworzyć dokumentu.';
+                } finally {
+                    this.docx.loading = false;
+                }
+            },
+
+            /**
+             * Wyciąga word/document.xml z pliku .docx (czyli z archiwum ZIP).
+             *
+             * Czytamy archiwum samodzielnie i rozpakowujemy wbudowanym w
+             * przeglądarkę DecompressionStream. Bez zewnętrznej biblioteki:
+             * jedna zależność mniej, działa też bez dostępu do CDN.
+             */
+            async wyjmijTrescDocx(bufor) {
+                const widok = new DataView(bufor);
+                const bajty = new Uint8Array(bufor);
+
+                if (bajty.length < 22 || widok.getUint32(0, true) !== 0x04034b50) {
+                    throw new Error('To nie wygląda na poprawny plik .docx.');
+                }
+
+                /* Koniec katalogu centralnego szukamy od końca pliku. */
+                let eocd = -1;
+                const granica = Math.max(0, bajty.length - 65558);
+                for (let i = bajty.length - 22; i >= granica; i--) {
+                    if (widok.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+                }
+                if (eocd < 0) {
+                    throw new Error('Uszkodzona struktura pliku .docx.');
+                }
+
+                const wpisow = widok.getUint16(eocd + 10, true);
+                let pozycja = widok.getUint32(eocd + 16, true);
+                let wpis = null;
+
+                for (let i = 0; i < wpisow; i++) {
+                    if (pozycja + 46 > bajty.length || widok.getUint32(pozycja, true) !== 0x02014b50) break;
+
+                    const dlNazwy = widok.getUint16(pozycja + 28, true);
+                    const nazwa = new TextDecoder('utf-8').decode(bajty.subarray(pozycja + 46, pozycja + 46 + dlNazwy));
+
+                    if (nazwa === 'word/document.xml') {
+                        wpis = {
+                            metoda: widok.getUint16(pozycja + 10, true),
+                            rozmiarSpakowany: widok.getUint32(pozycja + 20, true),
+                            offset: widok.getUint32(pozycja + 42, true)
+                        };
+                        break;
+                    }
+                    pozycja += 46 + dlNazwy + widok.getUint16(pozycja + 30, true) + widok.getUint16(pozycja + 32, true);
+                }
+
+                if (!wpis) {
+                    throw new Error('W dokumencie brakuje głównej treści (word/document.xml).');
+                }
+                if (widok.getUint32(wpis.offset, true) !== 0x04034b50) {
+                    throw new Error('Uszkodzona struktura pliku .docx.');
+                }
+
+                const start = wpis.offset + 30
+                    + widok.getUint16(wpis.offset + 26, true)
+                    + widok.getUint16(wpis.offset + 28, true);
+                const spakowane = bajty.subarray(start, start + wpis.rozmiarSpakowany);
+
+                if (wpis.metoda === 0) {
+                    return new TextDecoder('utf-8').decode(spakowane);
+                }
+                if (wpis.metoda !== 8) {
+                    throw new Error('Dokument użył nieobsługiwanej kompresji. Pobierz plik i otwórz w Wordzie.');
+                }
+                if (typeof DecompressionStream === 'undefined') {
+                    throw new Error('Ta przeglądarka nie potrafi rozpakować dokumentu. Pobierz plik i otwórz w Wordzie.');
+                }
+
+                try {
+                    const strumien = new Blob([spakowane]).stream()
+                        .pipeThrough(new DecompressionStream('deflate-raw'));
+                    return new TextDecoder('utf-8').decode(await new Response(strumien).arrayBuffer());
+                } catch (e) {
+                    /* Rozpakowanie wykłada się tylko na uszkodzonych danych. */
+                    throw new Error('Dokument jest uszkodzony i nie da się go rozpakować. Pobierz plik i sprawdź go w Wordzie.');
+                }
+            },
+
+            /** Zamienia treść dokumentu Worda (OOXML) na czytelny HTML. */
+            docxNaHtml(xml) {
+                const W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+                const dokument = new DOMParser().parseFromString(xml, 'application/xml');
+                if (dokument.getElementsByTagName('parsererror').length) {
+                    throw new Error('Nie udało się odczytać treści dokumentu.');
+                }
+
+                const esc = (s) => String(s)
+                    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+                const dziecko = (el, nazwa) => {
+                    for (const w of Array.from(el.childNodes)) {
+                        if (w.localName === nazwa && w.namespaceURI === W) return w;
+                    }
+                    return null;
+                };
+
+                /* Składa tekst akapitu, zachowując pogrubienie i kursywę. */
+                const trescAkapitu = (p) => {
+                    let out = '';
+                    for (const r of Array.from(p.getElementsByTagNameNS(W, 'r'))) {
+                        const wlasciwosci = dziecko(r, 'rPr');
+                        const pogrubienie = wlasciwosci && dziecko(wlasciwosci, 'b');
+                        const kursywa = wlasciwosci && dziecko(wlasciwosci, 'i');
+
+                        let tekst = '';
+                        for (const w of Array.from(r.childNodes)) {
+                            if (w.namespaceURI !== W) continue;
+                            if (w.localName === 't') tekst += w.textContent;
+                            else if (w.localName === 'tab') tekst += '\t';
+                            else if (w.localName === 'br' || w.localName === 'cr') tekst += '\n';
+                        }
+                        if (tekst === '') continue;
+
+                        let fragment = esc(tekst).replace(/\n/g, '<br>').replace(/\t/g, '&nbsp;&nbsp;&nbsp;&nbsp;');
+                        if (pogrubienie) fragment = '<strong>' + fragment + '</strong>';
+                        if (kursywa) fragment = '<em>' + fragment + '</em>';
+                        out += fragment;
+                    }
+                    return out;
+                };
+
+                /* Poziom nagłówka bierzemy ze stylu albo z poziomu konspektu. */
+                const poziomNaglowka = (p) => {
+                    const wlasciwosci = dziecko(p, 'pPr');
+                    if (!wlasciwosci) return 0;
+
+                    const styl = dziecko(wlasciwosci, 'pStyle');
+                    if (styl) {
+                        const wartosc = styl.getAttributeNS(W, 'val') || '';
+                        const trafienie = wartosc.match(/^(?:heading|Nag)\D*(\d)/i);
+                        if (trafienie) return Math.min(6, parseInt(trafienie[1], 10));
+                    }
+                    const konspekt = dziecko(wlasciwosci, 'outlineLvl');
+                    if (konspekt) {
+                        const lvl = parseInt(konspekt.getAttributeNS(W, 'val') || '', 10);
+                        if (!isNaN(lvl) && lvl < 6) return lvl + 1;
+                    }
+                    return 0;
+                };
+
+                const czyPunktListy = (p) => {
+                    const wlasciwosci = dziecko(p, 'pPr');
+                    return !!(wlasciwosci && dziecko(wlasciwosci, 'numPr'));
+                };
+
+                const cialo = dokument.getElementsByTagNameNS(W, 'body')[0];
+                if (!cialo) throw new Error('Dokument nie zawiera treści.');
+
+                let out = '';
+                let listaOtwarta = false;
+                const zamknijListe = () => { if (listaOtwarta) { out += '</ul>'; listaOtwarta = false; } };
+
+                for (const el of Array.from(cialo.children)) {
+                    if (el.namespaceURI !== W) continue;
+
+                    if (el.localName === 'p') {
+                        const tresc = trescAkapitu(el);
+                        if (!tresc) continue;
+
+                        if (czyPunktListy(el)) {
+                            if (!listaOtwarta) { out += '<ul>'; listaOtwarta = true; }
+                            out += '<li>' + tresc + '</li>';
+                            continue;
+                        }
+                        zamknijListe();
+
+                        const poziom = poziomNaglowka(el);
+                        out += poziom
+                            ? '<h' + poziom + '>' + tresc + '</h' + poziom + '>'
+                            : '<p>' + tresc + '</p>';
+                        continue;
+                    }
+
+                    if (el.localName === 'tbl') {
+                        zamknijListe();
+                        out += '<table>';
+                        let pierwszyWiersz = true;
+                        for (const wiersz of Array.from(el.getElementsByTagNameNS(W, 'tr'))) {
+                            const znacznik = pierwszyWiersz ? 'th' : 'td';
+                            out += '<tr>';
+                            for (const komorka of Array.from(wiersz.getElementsByTagNameNS(W, 'tc'))) {
+                                const czesci = Array.from(komorka.getElementsByTagNameNS(W, 'p'))
+                                    .map(trescAkapitu).filter(Boolean);
+                                out += '<' + znacznik + '>' + (czesci.join('<br>') || '&nbsp;') + '</' + znacznik + '>';
+                            }
+                            out += '</tr>';
+                            pierwszyWiersz = false;
+                        }
+                        out += '</table>';
+                    }
+                }
+                zamknijListe();
+
+                return out;
+            },
+
+            /**
+             * Przepuszcza tylko znaczniki, które mogą wyjść z dokumentu tekstowego.
+             * Dokument bywa cudzy, więc traktujemy go jak treść niezaufaną.
+             */
+            oczyscHtml(html) {
+                const pojemnik = document.createElement('div');
+                pojemnik.innerHTML = String(html || '');
+
+                const dozwolone = /^(P|BR|B|STRONG|I|EM|U|S|SUP|SUB|H1|H2|H3|H4|H5|H6|UL|OL|LI|TABLE|THEAD|TBODY|TFOOT|TR|TD|TH|A|IMG|BLOCKQUOTE|PRE|CODE|HR|SPAN|DIV)$/;
+
+                Array.from(pojemnik.querySelectorAll('*')).forEach((el) => {
+                    if (!dozwolone.test(el.tagName)) { el.remove(); return; }
+
+                    Array.from(el.attributes).forEach((atrybut) => {
+                        const nazwa = atrybut.name.toLowerCase();
+
+                        if (nazwa.startsWith('on')) { el.removeAttribute(atrybut.name); return; }
+                        if (nazwa === 'href') {
+                            if (/^https?:/i.test(atrybut.value)) {
+                                el.setAttribute('target', '_blank');
+                                el.setAttribute('rel', 'noopener noreferrer');
+                            } else {
+                                el.removeAttribute(atrybut.name);
+                            }
+                            return;
+                        }
+                        if (nazwa === 'src') {
+                            /* Obrazy z dokumentu przychodzą jako data:image — nic innego nie wpuszczamy. */
+                            if (!/^data:image\//i.test(atrybut.value)) el.removeAttribute(atrybut.name);
+                            return;
+                        }
+                        if (['colspan', 'rowspan', 'alt'].indexOf(nazwa) === -1) {
+                            el.removeAttribute(atrybut.name);
+                        }
+                    });
+                });
+
+                return pojemnik.innerHTML;
+            },
+
             deleteFile(file) {
                 this.confirm({
                     title: 'Usunąć plik?',
@@ -2103,6 +2430,7 @@ function render_setup_error(string $message): void
 
             closeTop() {
                 if (this.ask.open) { this.ask.open = false; return; }
+                if (this.docx.open) { this.docx.open = false; return; }
                 if (this.filePickerOpen) { this.filePickerOpen = false; return; }
                 if (this.task.open) { this.task.open = false; return; }
                 if (this.feedOpen) { this.feedOpen = false; return; }
