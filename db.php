@@ -21,7 +21,41 @@ const ACTIVITY_LIMIT   = 20;             // ile wpisów pokazuje dziennik zmian
 const ACTIVITY_KEEP    = 500;            // ile wpisów trzymamy w bazie
 const LOGIN_MAX_FAILS  = 8;              // blokada logowania po N nieudanych próbach
 const LOGIN_LOCK_MIN   = 15;             // ...na ile minut
-const SCHEMA_VERSION   = 4;
+const SCHEMA_VERSION   = 5;
+
+/* --- Wideorozmowy ------------------------------------------------- *
+ * Obraz i dźwięk idą bezpośrednio między przeglądarkami (WebRTC P2P);
+ * serwer pośredniczy tylko w nawiązaniu połączenia. Przy czteroosobowym
+ * zespole to najprostsze rozwiązanie: nie wymaga żadnej usługi obcej,
+ * a po zestawieniu połączenia nie obciąża hostingu.                   */
+
+/** Ile minut przed startem można wejść do pokoju (i ile po planowanym końcu). */
+const MEETING_JOIN_EARLY_MIN = 15;
+const MEETING_JOIN_LATE_MIN  = 120;
+
+/** Po ilu sekundach bez sygnału życia uznajemy, że ktoś wyszedł z pokoju. */
+const MEETING_PEER_TIMEOUT = 25;
+
+/**
+ * Serwery STUN — mówią przeglądarce, jaki ma publiczny adres.
+ * Publiczne i darmowe; nie przechodzi przez nie żaden obraz ani dźwięk.
+ */
+const STUN_SERVERS = [
+    'stun:stun.l.google.com:19302',
+    'stun:stun1.l.google.com:19302',
+    'stun:stun.cloudflare.com:3478',
+];
+
+/**
+ * Serwery TURN — przekaźnik na wypadek sieci, która nie przepuszcza
+ * połączenia bezpośredniego (część sieci firmowych i komórkowych).
+ * Puste = brak przekaźnika; panel zadziała wtedy w większości sieci,
+ * ale nie we wszystkich i powie o tym wprost.
+ *
+ * Żeby dodać własny, wpisz tu:
+ *   ['urls' => 'turn:adres:3478', 'username' => 'login', 'credential' => 'haslo'],
+ */
+const TURN_SERVERS = [];
 
 /* Żaden komunikat PHP nie może trafić do odpowiedzi: zepsułby JSON API,
    a przy okazji uniemożliwił wysłanie nagłówków sesji. Błędy idą do logu.
@@ -364,6 +398,85 @@ function migrate_schema(PDO $pdo, int $from): void
         );
         $pdo->exec('CREATE INDEX IF NOT EXISTS idx_comments_task ON task_comments(task_id)');
     }
+
+    /* v4 -> v5: wideorozmowy — spotkania, uczestnicy, notatki, sygnalizacja.
+       Same nowe tabele; żadna istniejąca nie jest ruszana. */
+    if ($from < 5) {
+        $pdo->exec(
+            'CREATE TABLE IF NOT EXISTS meetings (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                room_id      TEXT    NOT NULL UNIQUE,
+                title        TEXT    NOT NULL,
+                description  TEXT    NOT NULL DEFAULT \'\',
+                folder_id    INTEGER REFERENCES folders(id) ON DELETE SET NULL,
+                starts_at    TEXT    NOT NULL,
+                duration_min INTEGER NOT NULL DEFAULT 30,
+                status       TEXT    NOT NULL DEFAULT \'scheduled\',
+                started_at   TEXT,
+                ended_at     TEXT,
+                created_by   INTEGER NOT NULL REFERENCES users(id),
+                created_at   TEXT    NOT NULL,
+                updated_by   INTEGER REFERENCES users(id),
+                updated_at   TEXT
+            )'
+        );
+
+        $pdo->exec(
+            'CREATE TABLE IF NOT EXISTS meeting_participants (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                meeting_id INTEGER NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+                user_id    INTEGER REFERENCES users(id),
+                email      TEXT,
+                role       TEXT    NOT NULL DEFAULT \'guest\',
+                invited_at TEXT    NOT NULL
+            )'
+        );
+
+        $pdo->exec(
+            'CREATE TABLE IF NOT EXISTS meeting_notes (
+                meeting_id INTEGER PRIMARY KEY REFERENCES meetings(id) ON DELETE CASCADE,
+                content    TEXT    NOT NULL DEFAULT \'\',
+                revision   INTEGER NOT NULL DEFAULT 0,
+                updated_by INTEGER REFERENCES users(id),
+                updated_at TEXT
+            )'
+        );
+
+        $pdo->exec(
+            'CREATE TABLE IF NOT EXISTS meeting_presence (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                meeting_id INTEGER NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+                peer_id    TEXT    NOT NULL UNIQUE,
+                user_id    INTEGER NOT NULL REFERENCES users(id),
+                mic        INTEGER NOT NULL DEFAULT 1,
+                cam        INTEGER NOT NULL DEFAULT 1,
+                sharing    INTEGER NOT NULL DEFAULT 0,
+                joined_at  TEXT    NOT NULL,
+                seen_at    TEXT    NOT NULL
+            )'
+        );
+
+        $pdo->exec(
+            'CREATE TABLE IF NOT EXISTS meeting_signals (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                meeting_id INTEGER NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+                from_peer  TEXT    NOT NULL,
+                to_peer    TEXT    NOT NULL,
+                kind       TEXT    NOT NULL,
+                payload    TEXT    NOT NULL,
+                created_at TEXT    NOT NULL
+            )'
+        );
+
+        $pdo->exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_mp_user
+                    ON meeting_participants(meeting_id, user_id) WHERE user_id IS NOT NULL');
+        $pdo->exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_mp_email
+                    ON meeting_participants(meeting_id, email)   WHERE email IS NOT NULL');
+        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_meetings_start   ON meetings(starts_at)');
+        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_mp_meeting       ON meeting_participants(meeting_id)');
+        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_presence_meeting ON meeting_presence(meeting_id)');
+        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_signals_inbox    ON meeting_signals(to_peer, id)');
+    }
 }
 
 function schema_sql(): string
@@ -438,6 +551,88 @@ CREATE TABLE IF NOT EXISTS task_comments (
 );
 
 CREATE INDEX IF NOT EXISTS idx_comments_task ON task_comments(task_id);
+
+-- ---------------------------------------------------------------
+-- Wideorozmowy
+-- ---------------------------------------------------------------
+
+-- Zaplanowane spotkanie. room_id jest publicznym identyfikatorem pokoju:
+-- trafia do adresu, więc musi być losowy, a nie kolejny numer.
+CREATE TABLE IF NOT EXISTS meetings (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    room_id      TEXT    NOT NULL UNIQUE,
+    title        TEXT    NOT NULL,
+    description  TEXT    NOT NULL DEFAULT '',
+    folder_id    INTEGER REFERENCES folders(id) ON DELETE SET NULL,
+    starts_at    TEXT    NOT NULL,
+    duration_min INTEGER NOT NULL DEFAULT 30,
+    status       TEXT    NOT NULL DEFAULT 'scheduled',
+    started_at   TEXT,
+    ended_at     TEXT,
+    created_by   INTEGER NOT NULL REFERENCES users(id),
+    created_at   TEXT    NOT NULL,
+    updated_by   INTEGER REFERENCES users(id),
+    updated_at   TEXT
+);
+
+-- Uczestnik: albo profil z panelu (user_id), albo sam adres e-mail
+-- osoby spoza zespołu. Klucz złożony odpada, bo SQLite dopuszcza
+-- powtórzone NULL-e w kluczu — stąd dwa indeksy częściowe niżej.
+CREATE TABLE IF NOT EXISTS meeting_participants (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    meeting_id INTEGER NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+    user_id    INTEGER REFERENCES users(id),
+    email      TEXT,
+    role       TEXT    NOT NULL DEFAULT 'guest',
+    invited_at TEXT    NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_mp_user
+    ON meeting_participants(meeting_id, user_id) WHERE user_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_mp_email
+    ON meeting_participants(meeting_id, email)   WHERE email IS NOT NULL;
+
+-- Notatka ze spotkania — jedna na spotkanie, jak notatka folderu.
+-- revision rośnie z każdym zapisem; służy do wykrycia, że ktoś inny
+-- zapisał w międzyczasie swoją wersję.
+CREATE TABLE IF NOT EXISTS meeting_notes (
+    meeting_id INTEGER PRIMARY KEY REFERENCES meetings(id) ON DELETE CASCADE,
+    content    TEXT    NOT NULL DEFAULT '',
+    revision   INTEGER NOT NULL DEFAULT 0,
+    updated_by INTEGER REFERENCES users(id),
+    updated_at TEXT
+);
+
+-- Kto jest teraz w pokoju. peer_id identyfikuje kartę przeglądarki,
+-- nie osobę: ta sama osoba może wejść z dwóch urządzeń.
+CREATE TABLE IF NOT EXISTS meeting_presence (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    meeting_id INTEGER NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+    peer_id    TEXT    NOT NULL UNIQUE,
+    user_id    INTEGER NOT NULL REFERENCES users(id),
+    mic        INTEGER NOT NULL DEFAULT 1,
+    cam        INTEGER NOT NULL DEFAULT 1,
+    sharing    INTEGER NOT NULL DEFAULT 0,
+    joined_at  TEXT    NOT NULL,
+    seen_at    TEXT    NOT NULL
+);
+
+-- Skrzynka sygnalizacyjna WebRTC: oferty, odpowiedzi i kandydaci ICE.
+-- Wiadomości są jednorazowe — odbiorca je pobiera i od razu kasuje.
+CREATE TABLE IF NOT EXISTS meeting_signals (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    meeting_id INTEGER NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+    from_peer  TEXT    NOT NULL,
+    to_peer    TEXT    NOT NULL,
+    kind       TEXT    NOT NULL,
+    payload    TEXT    NOT NULL,
+    created_at TEXT    NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_meetings_start   ON meetings(starts_at);
+CREATE INDEX IF NOT EXISTS idx_mp_meeting       ON meeting_participants(meeting_id);
+CREATE INDEX IF NOT EXISTS idx_presence_meeting ON meeting_presence(meeting_id);
+CREATE INDEX IF NOT EXISTS idx_signals_inbox    ON meeting_signals(to_peer, id);
 
 CREATE TABLE IF NOT EXISTS activity (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -738,6 +933,67 @@ function clean_date($value): ?string
         throw new ApiError('Podana data nie istnieje w kalendarzu.');
     }
     return $value;
+}
+
+/**
+ * Sprawdza godzinę w formacie GG:MM (doba 24-godzinna).
+ * Jak clean_date() — woli powiedzieć wprost, że wartość jest zła,
+ * niż po cichu podstawić coś swojego.
+ */
+function clean_time($value): string
+{
+    $value = trim((string)$value);
+    if (!preg_match('/^(\d{1,2}):(\d{2})$/', $value, $m)) {
+        throw new ApiError('Godzina musi być w formacie GG:MM, np. 14:30.');
+    }
+    $godzina = (int)$m[1];
+    $minuta  = (int)$m[2];
+    if ($godzina > 23 || $minuta > 59) {
+        throw new ApiError('Podana godzina nie istnieje.');
+    }
+    return sprintf('%02d:%02d', $godzina, $minuta);
+}
+
+/**
+ * Identyfikator pokoju widoczny w linku, np. „krz-fmbq-wtd”.
+ * Alfabet bez znaków, które mylą się przy przepisywaniu (0/O, 1/l/I).
+ * Losowość z random_bytes: link jest jedynym zabezpieczeniem pokoju
+ * przed odgadnięciem, więc nie może dać się przewidzieć.
+ */
+function new_room_id(): string
+{
+    $alfabet = 'abcdefghjkmnpqrstuvwxyz23456789';
+    $dlugosc = strlen($alfabet);
+
+    $czlony = [];
+    foreach ([3, 4, 3] as $ile) {
+        $czlon = '';
+        for ($i = 0; $i < $ile; $i++) {
+            $czlon .= $alfabet[random_int(0, $dlugosc - 1)];
+        }
+        $czlony[] = $czlon;
+    }
+    return implode('-', $czlony);
+}
+
+/**
+ * Konfiguracja ICE przekazywana przeglądarce. STUN wystarcza w większości
+ * sieci domowych i biurowych; TURN bywa potrzebny tam, gdzie NAT nie
+ * przepuszcza połączenia bezpośredniego — i wtedy trzeba go dopisać
+ * w konfiguracji na górze tego pliku.
+ */
+function ice_servers(): array
+{
+    $lista = [];
+    if (STUN_SERVERS) {
+        $lista[] = ['urls' => array_values(STUN_SERVERS)];
+    }
+    foreach (TURN_SERVERS as $turn) {
+        if (!empty($turn['urls'])) {
+            $lista[] = $turn;
+        }
+    }
+    return $lista;
 }
 
 /** Zapisuje szczegóły błędu do data/error.log i zwraca krótki identyfikator. */

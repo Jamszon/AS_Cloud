@@ -136,6 +136,14 @@ function icon(string $name, string $class = 'h-5 w-5'): string
         'sun'      => '<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2m0 15v2M4.6 4.6 6 6m12 12 1.4 1.4M2.5 12h2m15 0h2M4.6 19.4 6 18M18 6l1.4-1.4"/>',
         'moon'     => '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/>',
         'grip'     => '<path d="M4 9h16M4 15h16"/>',
+        'chevronL' => '<path d="m15 19-7-7 7-7"/>',
+        'video'    => '<path d="M4.5 6.8h9A2.3 2.3 0 0 1 15.8 9v6a2.3 2.3 0 0 1-2.3 2.3h-9A2.3 2.3 0 0 1 2.3 15V9a2.3 2.3 0 0 1 2.2-2.2Zm11.3 3.4 5.2-3v9.6l-5.2-3"/>',
+        'videoOff' => '<path d="M4.5 6.8h6.8m4.5 3.4 5.2-3v9.6l-5.2-3v1.2a2.3 2.3 0 0 1-2.3 2.3h-9A2.3 2.3 0 0 1 2.3 15V9c0-.8.4-1.5 1-1.9M3 3l18 18"/>',
+        'mic'      => '<path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3Zm6-3.8a6 6 0 0 1-12 0M12 18v3m-3.4 0h6.8"/>',
+        'micOff'   => '<path d="M9 9.3V6a3 3 0 0 1 5.9-.7M15 12.4a3 3 0 0 1-4.5 2.2M18 11.3a6 6 0 0 1-1 3.4M6 11.3A6 6 0 0 0 12 18m0 0v3m-3.4 0h6.8M3 3l18 18"/>',
+        'screen'   => '<path d="M3.8 4.5h16.4v12H3.8zM8.3 20.3h7.5M12 16.5v3.8m0-13.9v6m0-6L9.8 8.6M12 6.4l2.3 2.2"/>',
+        'copy'     => '<path d="M9 12a2.3 2.3 0 0 1 2.3-2.3h6A2.3 2.3 0 0 1 19.5 12v6a2.3 2.3 0 0 1-2.2 2.3h-6A2.3 2.3 0 0 1 9 18Zm-2.3 3H5.3A2.3 2.3 0 0 1 3 12.8v-6a2.3 2.3 0 0 1 2.3-2.3h6a2.3 2.3 0 0 1 2.2 2.3V8"/>',
+        'chevronR' => '<path d="m9 5 7 7-7 7"/>',
         'prioHigh' => '<path d="M12 19V5m0 0-6 6m6-6 6 6"/>',
         'prioLow'  => '<path d="M12 5v14m0 0 6-6m-6 6-6-6"/>',
         'prioMid'  => '<path d="M5 12h14"/>',
@@ -144,6 +152,164 @@ function icon(string $name, string $class = 'h-5 w-5'): string
     $d = $paths[$name] ?? '';
     return '<svg class="' . h($class) . '" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
         . 'stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' . $d . '</svg>';
+}
+
+/**
+ * Wiersz zadania na liście zbiorczej — używany w „Moich zadaniach”
+ * i w kalendarzu. Oba widoki pokazują zadania z różnych folderów naraz,
+ * więc każdy wiersz musi sam mówić, skąd pochodzi.
+ *
+ * Oczekuje zmiennej Alpine `t` w otaczającym zakresie (x-for).
+ */
+function task_row(): string
+{
+    ob_start(); ?>
+    <div @click="otworzZListy(t)"
+         class="flex cursor-pointer items-start gap-3 border-b border-line px-4 py-3 transition last:border-0 hover:bg-surface2">
+
+        <button @click.stop="toggleDone(t)" title="Oznacz jako zrobione"
+                class="mt-0.5 flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-md border-2 transition"
+                :class="t.status === 'done'
+                        ? 'border-emerald-500 bg-emerald-500 text-white'
+                        : 'border-linestrong text-transparent hover:border-emerald-400'">
+            <?= icon('check', 'h-3 w-3') ?>
+        </button>
+
+        <div class="min-w-0 flex-1">
+            <div class="flex flex-wrap items-center gap-1.5">
+                <p class="text-sm font-medium text-ink"
+                   :class="t.status === 'done' ? 'line-through text-muted' : ''" x-text="t.title"></p>
+                <template x-if="t.priority !== 'normal'">
+                    <span class="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-bold uppercase"
+                          :style="priorityStyle(t.priority)">
+                        <span x-html="priorityIcon(t.priority)"></span>
+                        <span x-text="priorityLabel(t.priority)"></span>
+                    </span>
+                </template>
+                <template x-if="t.due_date">
+                    <span class="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-semibold"
+                          :style="terminStyle(t.due_date, t.status)"
+                          x-text="terminEtykieta(t.due_date, t.status)"></span>
+                </template>
+            </div>
+
+            <p class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-faint">
+                <span class="inline-flex items-center gap-1">
+                    <?= icon('folder', 'h-3 w-3') ?>
+                    <span class="text-muted" x-text="t.folder_name"></span>
+                </span>
+                <span x-text="'· ' + kolumnaEtykieta(t.status)"></span>
+                <template x-if="t.comment_count > 0">
+                    <span>· <span x-text="t.comment_count"></span> kom.</span>
+                </template>
+                <template x-if="t.file_count > 0">
+                    <span>· <span x-text="t.file_count"></span> zał.</span>
+                </template>
+            </p>
+        </div>
+
+        <span class="flex shrink-0 -space-x-1.5">
+            <template x-for="a in t.assignees" :key="a.id">
+                <span class="flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-bold text-white ring-2 ring-surface"
+                      :style="'background:' + accent(a.color).solid"
+                      :title="a.name" x-text="initials(a.name)"></span>
+            </template>
+        </span>
+    </div>
+    <?php return (string)ob_get_clean();
+}
+
+/**
+ * Edytor notatki ze spotkania. Ten sam blok obsługuje okno w historii
+ * spotkań i panel boczny w trakcie rozmowy, więc pisownia, autozapis
+ * i obsługa kolizji są w obu miejscach identyczne.
+ *
+ * Oczekuje obiektu `notatka` w stanie komponentu Alpine.
+ */
+function meeting_note_editor(string $wysokosc = ''): string
+{
+    /*
+     * Dwa tryby wysokości i nie wolno ich mieszać:
+     *
+     *  - bez podanej wysokości edytor wypełnia rodzica (panel w pokoju,
+     *    który ma określoną wysokość),
+     *  - z podaną wysokością to edytor narzuca rozmiar, a okno rośnie do niego.
+     *
+     * Wcześniej pole miało naraz „flex-1” i klasę „h-[52vh]”. W kolumnie
+     * flex baza 0% z flex-1 wygrywa z wysokością, więc w oknie modalnym cały
+     * edytor zwijał się do zera i notatki po prostu nie było widać.
+     */
+    $rozciag = $wysokosc === '' ? 'min-h-0 flex-1' : $wysokosc;
+    $korzen  = $wysokosc === '' ? 'flex h-full min-h-0 flex-col' : 'flex min-h-0 flex-col';
+
+    ob_start(); ?>
+    <div class="<?= h($korzen) ?>">
+
+        <div class="mb-2 flex flex-wrap items-center gap-2">
+            <div class="flex items-center gap-1 rounded-xl bg-surface3 p-1">
+                <button type="button" @click="notatka.tryb = 'edit'"
+                        :class="notatka.tryb === 'edit' ? 'bg-surface text-brandink shadow-sm' : 'text-muted hover:text-ink2'"
+                        class="rounded-lg px-3 py-1.5 text-xs font-medium transition">Edycja</button>
+                <button type="button" @click="notatka.tryb = 'view'"
+                        :class="notatka.tryb === 'view' ? 'bg-surface text-brandink shadow-sm' : 'text-muted hover:text-ink2'"
+                        class="rounded-lg px-3 py-1.5 text-xs font-medium transition">Podgląd</button>
+            </div>
+
+            <!-- Stan autozapisu: bez tego nie wiadomo, czy notatka jest bezpieczna. -->
+            <span class="flex items-center gap-1.5 text-[11px]"
+                  :class="{
+                      'text-muted': notatka.stan === 'idle' || notatka.stan === 'saved',
+                      'text-amber-600 dark:text-amber-400': notatka.stan === 'dirty' || notatka.stan === 'saving',
+                      'text-red-600 dark:text-red-400': notatka.stan === 'error'
+                  }">
+                <span x-show="notatka.stan === 'saving'" class="h-1.5 w-1.5 animate-pulse rounded-full bg-current"></span>
+                <span x-text="notatkaStanTekst()"></span>
+            </span>
+
+            <span class="ml-auto text-[11px] text-faint" x-show="notatka.updated_by_name" x-cloak>
+                ostatnio: <span class="text-muted" x-text="notatka.updated_by_name"></span>
+            </span>
+        </div>
+
+        <!-- Kolizja: ktoś zapisał swoją wersję, kiedy my pisaliśmy swoją.
+             Nie wybieramy za użytkownika, która wersja jest ważniejsza. -->
+        <div x-show="notatka.konflikt" x-cloak
+             class="mb-2 rounded-xl border border-amber-300 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-950">
+            <p class="text-xs font-semibold text-amber-800 dark:text-amber-300">
+                Notatkę zapisał w międzyczasie
+                <span x-text="notatka.konflikt && notatka.konflikt.updated_by_name"></span>.
+            </p>
+            <p class="mt-1 text-[11px] leading-relaxed text-amber-700 dark:text-amber-400">
+                Twoja wersja nie została nadpisana — wybierz, co zrobić.
+            </p>
+            <div class="mt-2 flex flex-wrap gap-2">
+                <button type="button" @click="wczytajWersjeSerwera()"
+                        class="rounded-lg border border-amber-400 px-2.5 py-1.5 text-[11px] font-semibold text-amber-800 transition hover:bg-amber-100 dark:text-amber-300 dark:hover:bg-amber-900">
+                    Wczytaj wersję z serwera
+                </button>
+                <button type="button" @click="zapiszNotatkeSilowo()"
+                        class="rounded-lg bg-amber-600 px-2.5 py-1.5 text-[11px] font-semibold text-white transition hover:bg-amber-700">
+                    Zachowaj moją
+                </button>
+            </div>
+        </div>
+
+        <textarea x-show="notatka.tryb === 'edit'" x-model="notatka.draft"
+                  @input="notatkaZmieniona()"
+                  @keydown.ctrl.s.prevent="zapiszNotatke()" @keydown.meta.s.prevent="zapiszNotatke()"
+                  placeholder="Ustalenia, decyzje, zadania do rozdzielenia…&#10;&#10;Markdown działa: # nagłówek, - lista, **pogrubienie**."
+                  class="thin-scroll w-full resize-none rounded-xl border-line bg-surface2 px-3 py-2.5 font-mono text-[13px] leading-relaxed text-ink placeholder:text-faint focus:border-brand-400 focus:ring-2 focus:ring-brand-100 dark:focus:ring-brand-900 <?= h($rozciag) ?>"></textarea>
+
+        <!-- prose-invert jest tu obowiązkowe: bez niego Tailwind Typography
+             maluje tekst ciemną szarością, która na ciemnym tle znika.
+             Reszta panelu radzi sobie bez klas „dark:”, ale wtyczka prose
+             trzyma własne kolory poza naszymi zmiennymi. -->
+        <div x-show="notatka.tryb === 'view'"
+             :class="dark ? 'prose-invert' : ''"
+             class="thin-scroll prose prose-sm prose-slate max-w-none overflow-y-auto rounded-xl border border-line bg-surface2 px-4 py-3 prose-headings:font-semibold prose-a:text-brand-600 dark:prose-a:text-brand-400 <?= h($rozciag) ?>"
+             x-html="notatka.draft.trim() ? mdToHtml(notatka.draft) : '<p class=\'text-faint\'>Notatka jest pusta — przełącz na „Edycja”, żeby zacząć pisać.</p>'"></div>
+    </div>
+    <?php return (string)ob_get_clean();
 }
 
 /** Ekran awaryjny — pokazywany, gdy katalogi nie mają praw zapisu. */
@@ -487,6 +653,40 @@ function render_setup_error(string $message): void
                       class="rounded-full px-2 py-0.5 text-[11px] font-semibold text-white"
                       x-text="mineCount"></span>
             </button>
+
+            <button @click="pokazKalendarz()"
+                    :class="view === 'calendar' ? 'bg-brandsoft text-brandink ring-1 ring-brand-200 dark:ring-brand-800' : 'text-ink2 hover:bg-surface3'"
+                    class="mt-1 flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-left transition">
+                <span :class="view === 'calendar' ? 'text-brand-500' : 'text-faint'">
+                    <?= icon('calendar', 'h-[18px] w-[18px]') ?>
+                </span>
+                <span class="min-w-0 flex-1">
+                    <span class="block text-sm font-medium">Kalendarz</span>
+                    <span class="block text-[11px] text-faint">Terminy w układzie miesiąca</span>
+                </span>
+            </button>
+
+            <button @click="pokazSpotkania()"
+                    :class="view === 'meetings' ? 'bg-brandsoft text-brandink ring-1 ring-brand-200 dark:ring-brand-800' : 'text-ink2 hover:bg-surface3'"
+                    class="mt-1 flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-left transition">
+                <span :class="view === 'meetings' ? 'text-brand-500' : 'text-faint'">
+                    <?= icon('video', 'h-[18px] w-[18px]') ?>
+                </span>
+                <span class="min-w-0 flex-1">
+                    <span class="block text-sm font-medium">Spotkania</span>
+                    <span class="block text-[11px] text-faint">Wideorozmowy i notatki</span>
+                </span>
+
+                <!-- Trwająca rozmowa musi rzucać się w oczy z każdego widoku. -->
+                <span x-show="spotkaniaTrwajace.length" x-cloak
+                      class="flex items-center gap-1 rounded-full bg-emerald-500 px-2 py-0.5 text-[11px] font-semibold text-white">
+                    <span class="h-1.5 w-1.5 animate-pulse rounded-full bg-white"></span>
+                    <span x-text="spotkaniaTrwajace.length"></span>
+                </span>
+                <span x-show="!spotkaniaTrwajace.length && spotkaniaNadchodzace.length" x-cloak
+                      class="rounded-full bg-surface3 px-2 py-0.5 text-[11px] font-semibold text-muted"
+                      x-text="spotkaniaNadchodzace.length"></span>
+            </button>
         </div>
 
         <div class="px-4 pb-3">
@@ -594,10 +794,36 @@ function render_setup_error(string $message): void
                         <div>
                             <h1 class="truncate text-lg font-semibold tracking-tight text-ink">Moje zadania</h1>
                             <p class="truncate text-xs text-faint">
-                                <span x-text="mineCount"></span> otwartych zadań przypisanych do Ciebie
+                                <span x-text="odmianaZadan(mineCount)"></span> do zrobienia
                                 <template x-if="mineOverdue > 0">
                                     <span class="font-semibold text-red-600 dark:text-red-400">
                                         · <span x-text="mineOverdue"></span> po terminie
+                                    </span>
+                                </template>
+                            </p>
+                        </div>
+                    </template>
+                    <template x-if="view === 'meetings'">
+                        <div>
+                            <h1 class="truncate text-lg font-semibold tracking-tight text-ink">Spotkania</h1>
+                            <p class="truncate text-xs text-faint">
+                                <template x-if="spotkaniaTrwajace.length">
+                                    <span class="font-semibold text-emerald-600 dark:text-emerald-400">
+                                        <span x-text="spotkaniaTrwajace.length === 1 ? 'Trwa rozmowa' : spotkaniaTrwajace.length + ' trwające rozmowy'"></span> ·
+                                    </span>
+                                </template>
+                                <span x-text="odmianaSpotkan(spotkaniaNadchodzace.length)"></span> w planie
+                            </p>
+                        </div>
+                    </template>
+                    <template x-if="view === 'calendar'">
+                        <div>
+                            <h1 class="truncate text-lg font-semibold tracking-tight text-ink">Kalendarz</h1>
+                            <p class="truncate text-xs text-faint">
+                                <span x-text="odmianaZadan(kalWidoczne.length)"></span> z terminem w tym miesiącu
+                                <template x-if="kalPoTerminie > 0">
+                                    <span class="font-semibold text-red-600 dark:text-red-400">
+                                        · <span x-text="kalPoTerminie"></span> po terminie
                                     </span>
                                 </template>
                             </p>
@@ -718,6 +944,62 @@ function render_setup_error(string $message): void
                     </button>
                 </div>
             </div>
+
+            <!-- ---- Sterowanie spotkaniami ---- -->
+            <div x-show="view === 'meetings'" x-cloak class="flex flex-wrap items-center gap-2 px-4 pb-3 sm:px-6">
+                <button @click="nowSpotkanie()"
+                        class="flex items-center gap-2 rounded-xl bg-brand-600 px-3.5 py-2 text-sm font-semibold text-white shadow-lift transition hover:bg-brand-700">
+                    <?= icon('plus', 'h-4 w-4') ?> Umów spotkanie
+                </button>
+
+                <button @click="spotkaniaArchiwum = !spotkaniaArchiwum"
+                        :class="spotkaniaArchiwum ? 'border-brand-400 bg-brandsoft text-brandink' : 'border-line text-muted hover:border-linestrong'"
+                        class="rounded-xl border px-3 py-2 text-xs font-semibold transition">
+                    Archiwum
+                    <span class="ml-1 opacity-70" x-text="'(' + spotkaniaZakonczone.length + ')'"></span>
+                </button>
+
+                <span x-show="!bezpiecznyKontekst" x-cloak
+                      class="flex items-center gap-1.5 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-[11px] font-medium text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-300">
+                    <?= icon('lock', 'h-3.5 w-3.5') ?>
+                    Bez HTTPS przeglądarka nie udostępni kamery ani mikrofonu.
+                </span>
+            </div>
+
+            <!-- ---- Sterowanie kalendarzem ---- -->
+            <div x-show="view === 'calendar'" x-cloak class="flex flex-wrap items-center gap-2 px-4 pb-3 sm:px-6">
+                <div class="flex items-center gap-1 rounded-xl bg-surface3 p-1">
+                    <button @click="kalPrzesun(-1)" title="Poprzedni miesiąc" aria-label="Poprzedni miesiąc"
+                            class="rounded-lg p-1.5 text-muted transition hover:bg-surface hover:text-brandink">
+                        <?= icon('chevronL', 'h-4 w-4') ?>
+                    </button>
+                    <span class="min-w-[9rem] px-1 text-center text-sm font-semibold text-ink" x-text="kalTytul"></span>
+                    <button @click="kalPrzesun(1)" title="Następny miesiąc" aria-label="Następny miesiąc"
+                            class="rounded-lg p-1.5 text-muted transition hover:bg-surface hover:text-brandink">
+                        <?= icon('chevronR', 'h-4 w-4') ?>
+                    </button>
+                </div>
+
+                <button @click="kalDzis()"
+                        class="rounded-xl border border-line px-3 py-1.5 text-xs font-semibold text-muted transition hover:border-brand-300 hover:text-brand-600">
+                    Dziś
+                </button>
+
+                <div class="flex items-center gap-2 border-l border-line pl-3">
+                    <button @click="kal.tylkoMoje = !kal.tylkoMoje"
+                            :class="kal.tylkoMoje ? 'border-brand-400 bg-brandsoft text-brandink' : 'border-line text-muted hover:border-linestrong'"
+                            class="rounded-lg border px-2 py-1 text-[10px] font-semibold uppercase transition">
+                        Tylko moje
+                    </button>
+                    <button @click="kal.ukryjZrobione = !kal.ukryjZrobione"
+                            :class="kal.ukryjZrobione ? 'border-brand-400 bg-brandsoft text-brandink' : 'border-line text-muted hover:border-linestrong'"
+                            class="rounded-lg border px-2 py-1 text-[10px] font-semibold uppercase transition">
+                        Ukryj zrobione
+                    </button>
+                </div>
+
+                <span x-show="kal.ladowanie" x-cloak class="text-[11px] text-faint">Wczytywanie…</span>
+            </div>
         </header>
 
         <main class="min-h-0 flex-1 overflow-hidden">
@@ -764,58 +1046,266 @@ function render_setup_error(string $message): void
 
                             <div class="overflow-hidden rounded-2xl border border-line bg-surface shadow-card">
                                 <template x-for="t in grupa.zadania" :key="t.id">
-                                    <div @click="otworzZMoich(t)"
-                                         class="flex cursor-pointer items-start gap-3 border-b border-line px-4 py-3 transition last:border-0 hover:bg-surface2">
-
-                                        <button @click.stop="toggleDone(t)" title="Oznacz jako zrobione"
-                                                class="mt-0.5 flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-md border-2 border-linestrong text-transparent transition hover:border-emerald-400">
-                                            <?= icon('check', 'h-3 w-3') ?>
-                                        </button>
-
-                                        <div class="min-w-0 flex-1">
-                                            <div class="flex flex-wrap items-center gap-1.5">
-                                                <p class="text-sm font-medium text-ink" x-text="t.title"></p>
-                                                <template x-if="t.priority !== 'normal'">
-                                                    <span class="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-bold uppercase"
-                                                          :style="priorityStyle(t.priority)">
-                                                        <span x-html="priorityIcon(t.priority)"></span>
-                                                        <span x-text="priorityLabel(t.priority)"></span>
-                                                    </span>
-                                                </template>
-                                                <template x-if="t.due_date">
-                                                    <span class="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-semibold"
-                                                          :style="terminStyle(t.due_date, t.status)"
-                                                          x-text="terminEtykieta(t.due_date, t.status)"></span>
-                                                </template>
-                                            </div>
-
-                                            <p class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-faint">
-                                                <span class="inline-flex items-center gap-1">
-                                                    <?= icon('folder', 'h-3 w-3') ?>
-                                                    <span class="text-muted" x-text="t.folder_name"></span>
-                                                </span>
-                                                <span x-text="'· ' + kolumnaEtykieta(t.status)"></span>
-                                                <template x-if="t.comment_count > 0">
-                                                    <span>· <span x-text="t.comment_count"></span> kom.</span>
-                                                </template>
-                                                <template x-if="t.file_count > 0">
-                                                    <span>· <span x-text="t.file_count"></span> zał.</span>
-                                                </template>
-                                            </p>
-                                        </div>
-
-                                        <span class="flex shrink-0 -space-x-1.5">
-                                            <template x-for="a in t.assignees" :key="a.id">
-                                                <span class="flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-bold text-white ring-2 ring-surface"
-                                                      :style="'background:' + accent(a.color).solid"
-                                                      :title="a.name" x-text="initials(a.name)"></span>
-                                            </template>
-                                        </span>
-                                    </div>
-                                </template>
+                                    <?= task_row() ?>
+                                                                    </template>
                             </div>
                         </section>
                     </template>
+                </div>
+            </div>
+
+            <!-- ---------- Spotkania wideo ---------- -->
+            <div x-show="view === 'meetings'" x-cloak class="thin-scroll h-full overflow-y-auto p-4 sm:p-6">
+                <div class="mx-auto max-w-4xl space-y-5">
+
+                    <div x-show="!spotkania.length" class="rounded-2xl border border-line bg-surface p-10 text-center">
+                        <div class="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-brandsoft text-brand-500">
+                            <?= icon('video', 'h-7 w-7') ?>
+                        </div>
+                        <h2 class="text-base font-semibold text-ink">Nie ma jeszcze żadnego spotkania</h2>
+                        <p class="mx-auto mt-1.5 max-w-md text-sm leading-relaxed text-muted">
+                            Umów rozmowę, a panel wygeneruje pokój wideo z własnym linkiem i miejscem
+                            na wspólną notatkę. Rozmowa idzie bezpośrednio między przeglądarkami.
+                        </p>
+                        <button @click="nowSpotkanie()"
+                                class="mt-5 inline-flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-lift transition hover:bg-brand-700">
+                            <?= icon('plus', 'h-4 w-4') ?> Umów spotkanie
+                        </button>
+                    </div>
+
+                    <template x-for="grupa in spotkaniaWidoczne" :key="grupa.klucz">
+                        <section class="space-y-3">
+                            <h2 class="flex items-center gap-2 px-1 text-xs font-semibold uppercase tracking-wider"
+                                :class="grupa.klucz === 'live' ? 'text-emerald-600 dark:text-emerald-400' : 'text-faint'">
+                                <span x-text="grupa.etykieta"></span>
+                                <span class="rounded-md bg-surface3 px-1.5 text-[11px] font-semibold text-muted"
+                                      x-text="grupa.spotkania.length"></span>
+                            </h2>
+
+                        <template x-for="m in grupa.spotkania" :key="m.id">
+                            <article class="rounded-2xl border bg-surface p-4 shadow-card transition"
+                                     :class="m.status === 'live'
+                                             ? 'border-emerald-400 ring-1 ring-emerald-200 dark:ring-emerald-900'
+                                             : 'border-line'">
+
+                                <div class="flex flex-wrap items-start gap-x-3 gap-y-2">
+                                    <div class="min-w-0 flex-1">
+                                        <div class="flex flex-wrap items-center gap-2">
+                                            <h3 class="text-sm font-semibold text-ink" x-text="m.title"></h3>
+                                            <span class="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-bold uppercase"
+                                                  :style="statusSpotkaniaStyl(m.status)">
+                                                <span x-show="m.status === 'live'" class="h-1.5 w-1.5 animate-pulse rounded-full bg-current"></span>
+                                                <span x-text="statusSpotkaniaNazwa(m.status)"></span>
+                                            </span>
+                                            <template x-if="m.folder_name">
+                                                <span class="inline-flex items-center gap-1 text-[11px] text-faint">
+                                                    <?= icon('folder', 'h-3 w-3') ?>
+                                                    <span x-text="m.folder_name"></span>
+                                                </span>
+                                            </template>
+                                        </div>
+
+                                        <p class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-faint">
+                                            <span class="inline-flex items-center gap-1 font-medium text-muted">
+                                                <?= icon('calendar', 'h-3 w-3') ?>
+                                                <span x-text="terminSpotkania(m)"></span>
+                                            </span>
+                                            <span x-text="'· ' + m.duration_min + ' min'"></span>
+                                            <template x-if="m.in_room > 0">
+                                                <span class="font-semibold text-emerald-600 dark:text-emerald-400">
+                                                    · <span x-text="m.in_room"></span> w pokoju
+                                                </span>
+                                            </template>
+                                            <template x-if="m.has_note">
+                                                <span>· notatka jest</span>
+                                            </template>
+                                        </p>
+
+                                        <p x-show="m.description" x-cloak
+                                           class="mt-2 line-clamp-2 text-xs leading-relaxed text-muted" x-text="m.description"></p>
+                                    </div>
+
+                                    <span class="flex shrink-0 -space-x-1.5" title="Uczestnicy">
+                                        <template x-for="u in m.participants.filter(x => x.user_id)" :key="u.user_id">
+                                            <span class="flex h-7 w-7 items-center justify-center rounded-full text-[10px] font-bold text-white ring-2 ring-surface"
+                                                  :style="'background:' + accent(u.color).solid"
+                                                  :title="u.name + (u.role === 'host' ? ' (prowadzi)' : '')"
+                                                  x-text="initials(u.name)"></span>
+                                        </template>
+                                        <template x-if="m.participants.filter(x => x.email).length">
+                                            <span class="flex h-7 w-7 items-center justify-center rounded-full bg-surface3 text-[10px] font-bold text-muted ring-2 ring-surface"
+                                                  :title="m.participants.filter(x => x.email).map(x => x.email).join(', ')"
+                                                  x-text="'+' + m.participants.filter(x => x.email).length"></span>
+                                        </template>
+                                    </span>
+                                </div>
+
+                                <div class="mt-3 flex flex-wrap items-center gap-2 border-t border-line pt-3">
+                                    <button x-show="m.can_join" @click="wejdzDoPokoju(m)"
+                                            :class="m.status === 'live' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-brand-600 hover:bg-brand-700'"
+                                            class="flex items-center gap-2 rounded-xl px-3.5 py-2 text-sm font-semibold text-white shadow-lift transition">
+                                        <?= icon('video', 'h-4 w-4') ?>
+                                        <span x-text="m.status === 'live' ? 'Dołącz teraz' : 'Wejdź do pokoju'"></span>
+                                    </button>
+
+                                    <span x-show="!m.can_join" x-cloak class="text-[11px] text-faint" x-text="m.join_hint"></span>
+
+                                    <button @click="otworzNotatkeSpotkania(m)"
+                                            class="flex items-center gap-1.5 rounded-xl border border-line px-3 py-2 text-xs font-medium text-muted transition hover:border-brand-300 hover:text-brand-600">
+                                        <?= icon('note', 'h-3.5 w-3.5') ?> Notatka
+                                    </button>
+
+                                    <button @click="kopiujLinkSpotkania(m)" title="Skopiuj link do pokoju"
+                                            class="flex items-center gap-1.5 rounded-xl border border-line px-3 py-2 text-xs font-medium text-muted transition hover:border-brand-300 hover:text-brand-600">
+                                        <?= icon('copy', 'h-3.5 w-3.5') ?> Link
+                                    </button>
+
+                                    <div class="ml-auto flex items-center gap-1">
+                                        <template x-if="m.created_by === me.id">
+                                            <div class="flex items-center gap-1">
+                                                <button @click="edytujSpotkanie(m)" title="Zmień szczegóły"
+                                                        class="rounded-lg p-1.5 text-faint transition hover:bg-surface3 hover:text-brand-600">
+                                                    <?= icon('pencil', 'h-3.5 w-3.5') ?>
+                                                </button>
+                                                <button x-show="m.status !== 'cancelled' && m.status !== 'ended'"
+                                                        @click="zmienStatusSpotkania(m, 'cancelled')" title="Odwołaj spotkanie"
+                                                        class="rounded-lg p-1.5 text-faint transition hover:bg-surface3 hover:text-amber-600">
+                                                    <?= icon('close', 'h-3.5 w-3.5') ?>
+                                                </button>
+                                                <button x-show="m.status === 'cancelled'"
+                                                        @click="zmienStatusSpotkania(m, 'scheduled')" title="Przywróć spotkanie"
+                                                        class="rounded-lg p-1.5 text-faint transition hover:bg-surface3 hover:text-emerald-600">
+                                                    <?= icon('check', 'h-3.5 w-3.5') ?>
+                                                </button>
+                                                <button @click="usunSpotkanie(m)" title="Usuń spotkanie"
+                                                        class="rounded-lg p-1.5 text-faint transition hover:bg-surface3 hover:text-red-600">
+                                                    <?= icon('trash', 'h-3.5 w-3.5') ?>
+                                                </button>
+                                            </div>
+                                        </template>
+                                        <span x-show="m.created_by !== me.id" class="text-[11px] text-faint">
+                                            umówił: <span class="text-muted" x-text="m.created_by_name"></span>
+                                        </span>
+                                    </div>
+                                </div>
+                            </article>
+                        </template>
+                        </section>
+                    </template>
+                </div>
+            </div>
+
+            <!-- ---------- Kalendarz terminów ---------- -->
+            <div x-show="view === 'calendar'" x-cloak class="thin-scroll h-full overflow-y-auto p-4 sm:p-6">
+                <div class="mx-auto max-w-6xl space-y-4">
+
+                    <!-- Siatka miesiąca. Na telefonie zastępuje ją lista dni niżej:
+                         siedem kolumn na wąskim ekranie nie daje się czytać. -->
+                    <div class="hidden overflow-hidden rounded-2xl border border-line bg-surface shadow-card sm:block">
+                        <div class="grid grid-cols-7 border-b border-line bg-surface2">
+                            <!-- Weekendu nie wyróżniamy przygaszonym tekstem: przy 11 px
+                                 spada poniżej progu czytelności, a kolejność dni i tak
+                                 jest oczywista. -->
+                            <template x-for="d in ['pon', 'wt', 'śr', 'czw', 'pt', 'sob', 'niedz']" :key="d">
+                                <div class="px-2 py-2 text-center text-[11px] font-semibold uppercase tracking-wider text-faint"
+                                     x-text="d"></div>
+                            </template>
+                        </div>
+
+                        <div class="grid grid-cols-7 gap-px bg-line">
+                            <template x-for="c in kalSiatka" :key="c.iso">
+                                <div @click="kalWybierzDzien(c.iso)"
+                                     :class="[
+                                         c.wMiesiacu ? 'bg-surface' : 'bg-surface2',
+                                         kal.dzien === c.iso ? 'ring-2 ring-inset ring-brand-400' : ''
+                                     ]"
+                                     :title="c.zadania.length ? odmianaZadan(c.zadania.length) + ' tego dnia' : 'Brak zadań tego dnia'"
+                                     class="flex min-h-[104px] cursor-pointer flex-col gap-1 p-1.5 transition hover:brightness-[0.98] dark:hover:brightness-125">
+
+                                    <div class="flex items-center justify-between px-0.5">
+                                        <span class="text-[11px]"
+                                              :class="c.dzis
+                                                      ? 'flex h-5 w-5 items-center justify-center rounded-full bg-brand-600 font-semibold text-white'
+                                                      : (c.wMiesiacu ? 'text-ink2' : 'text-faint')"
+                                              x-text="c.numer"></span>
+                                        <span x-show="c.zadania.length > 3"
+                                              class="text-[10px] font-semibold text-faint"
+                                              x-text="'+' + (c.zadania.length - 3)"></span>
+                                    </div>
+
+                                    <template x-for="t in c.zadania.slice(0, 3)" :key="t.id">
+                                        <button @click.stop="otworzZListy(t)"
+                                                :style="kalChipStyle(t)"
+                                                :title="t.title + ' — ' + t.folder_name"
+                                                class="flex w-full items-center gap-1 rounded-md px-1.5 py-0.5 text-left text-[11px] font-medium">
+                                            <span class="h-1.5 w-1.5 shrink-0 rounded-full"
+                                                  :style="'background:' + kalKropka(t)"></span>
+                                            <span class="truncate"
+                                                  :class="t.status === 'done' ? 'line-through' : ''"
+                                                  x-text="t.title"></span>
+                                        </button>
+                                    </template>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
+
+                    <!-- Wersja na telefon: tylko dni, w których coś wypada. -->
+                    <div class="space-y-3 sm:hidden">
+                        <template x-for="c in kalAgenda" :key="c.iso">
+                            <section class="overflow-hidden rounded-2xl border border-line bg-surface shadow-card">
+                                <div class="flex items-center gap-2 border-b border-line px-4 py-2"
+                                     :class="c.dzis ? 'bg-brandsoft' : 'bg-surface2'">
+                                    <span class="text-xs font-semibold"
+                                          :class="c.dzis ? 'text-brandink' : 'text-ink2'" x-text="c.naglowek"></span>
+                                    <span class="ml-auto rounded-md bg-surface3 px-1.5 text-[11px] font-semibold text-muted"
+                                          x-text="c.zadania.length"></span>
+                                </div>
+                                <template x-for="t in c.zadania" :key="t.id">
+                                    <?= task_row() ?>
+                                </template>
+                            </section>
+                        </template>
+
+                        <p x-show="!kalAgenda.length" class="rounded-2xl border border-line bg-surface px-4 py-10 text-center text-sm text-muted">
+                            W tym miesiącu nie ma zadań z terminem.
+                        </p>
+                    </div>
+
+                    <!-- Szczegóły wybranego dnia — komplet zadań, także tych,
+                         które nie zmieściły się w kratce. -->
+                    <div x-show="kal.dzien" x-cloak class="overflow-hidden rounded-2xl border border-line bg-surface shadow-card">
+                        <div class="flex items-center gap-2 border-b border-line px-4 py-3">
+                            <span class="text-brand-500"><?= icon('calendar', 'h-4 w-4') ?></span>
+                            <h2 class="text-sm font-semibold text-ink" x-text="kalNaglowekDnia"></h2>
+                            <span class="rounded-md bg-surface3 px-1.5 text-[11px] font-semibold text-muted"
+                                  x-text="kalZadaniaDnia.length"></span>
+                            <button @click="kal.dzien = null" title="Zamknij podgląd dnia"
+                                    class="ml-auto rounded-lg p-1.5 text-faint transition hover:bg-surface3 hover:text-red-600">
+                                <?= icon('close', 'h-3.5 w-3.5') ?>
+                            </button>
+                        </div>
+
+                        <p x-show="!kalZadaniaDnia.length" class="px-4 py-8 text-center text-xs text-faint">
+                            Na ten dzień nie ma zaplanowanego żadnego zadania.
+                        </p>
+
+                        <template x-for="t in kalZadaniaDnia" :key="t.id">
+                            <?= task_row() ?>
+                        </template>
+                    </div>
+
+                    <div x-show="!kal.ladowanie && !kalWidoczne.length" x-cloak
+                         class="hidden rounded-2xl border border-line bg-surface p-10 text-center sm:block">
+                        <div class="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-brandsoft text-brand-500">
+                            <?= icon('calendar', 'h-7 w-7') ?>
+                        </div>
+                        <h2 class="text-base font-semibold text-ink">Pusty miesiąc</h2>
+                        <p class="mt-1.5 text-sm text-muted">
+                            Żadne zadanie nie ma tu terminu. Termin ustawisz w oknie zadania
+                            albo od razu przy dodawaniu go do kolumny.
+                        </p>
+                    </div>
                 </div>
             </div>
 
@@ -1478,6 +1968,371 @@ function render_setup_error(string $message): void
         </div>
     </div>
 
+    <!-- ========================= POKÓJ WIDEO ========================= -->
+    <!-- z-[70]: pokój przykrywa wszystko, także dziennik i okna modalne. -->
+    <div x-show="room.open" x-cloak class="fixed inset-0 z-[70] flex flex-col bg-slate-950 text-slate-100">
+
+        <header class="flex shrink-0 items-center gap-3 border-b border-slate-800 px-4 py-3">
+            <span class="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-800 text-brand-400">
+                <?= icon('video', 'h-[18px] w-[18px]') ?>
+            </span>
+            <div class="min-w-0 flex-1">
+                <h2 class="truncate text-sm font-semibold" x-text="room.title"></h2>
+                <p class="flex items-center gap-2 text-[11px] text-slate-400">
+                    <span class="flex items-center gap-1">
+                        <span class="h-1.5 w-1.5 rounded-full"
+                              :class="room.polaczenie === 'ok' ? 'bg-emerald-400' : (room.polaczenie === 'blad' ? 'bg-red-400' : 'bg-amber-400 animate-pulse')"></span>
+                        <span x-text="room.statusTekst"></span>
+                    </span>
+                    <span x-show="room.czas" x-cloak>· <span x-text="room.czas"></span></span>
+                    <span>· <span x-text="odmianaOsob(room.peers.length)"></span></span>
+                </p>
+            </div>
+
+            <button @click="room.listaOpen = !room.listaOpen" title="Lista obecnych"
+                    :class="room.listaOpen ? 'bg-slate-700 text-white' : 'text-slate-300 hover:bg-slate-800'"
+                    class="rounded-xl p-2.5 transition">
+                <?= icon('users', 'h-[18px] w-[18px]') ?>
+            </button>
+            <button @click="room.notatkiOpen = !room.notatkiOpen" title="Notatka ze spotkania"
+                    :class="room.notatkiOpen ? 'bg-slate-700 text-white' : 'text-slate-300 hover:bg-slate-800'"
+                    class="rounded-xl p-2.5 transition">
+                <?= icon('note', 'h-[18px] w-[18px]') ?>
+            </button>
+        </header>
+
+        <!-- Ostrzeżenia infrastrukturalne — zanim ktoś zacznie szukać winy w sobie. -->
+        <div x-show="room.ostrzezenie" x-cloak
+             class="shrink-0 border-b border-amber-800 bg-amber-950 px-4 py-2 text-[11px] leading-relaxed text-amber-200">
+            <span x-text="room.ostrzezenie"></span>
+        </div>
+
+        <div class="flex min-h-0 flex-1 flex-col lg:flex-row">
+
+            <!-- ---- Kafelki uczestników ---- -->
+            <main class="flex min-h-0 flex-1 flex-col">
+                <div class="thin-scroll min-h-0 flex-1 overflow-y-auto p-3">
+                    <div class="grid h-full gap-3" :class="ukladKafelkow">
+                        <template x-for="p in room.peers" :key="p.peer_id">
+                            <div class="relative flex min-h-[140px] items-center justify-center overflow-hidden rounded-2xl bg-slate-900 ring-1"
+                                 :class="p.mowi ? 'ring-emerald-400' : 'ring-slate-800'">
+
+                                <!-- Widok domyślny: rozmawiamy głosem, więc kafelek
+                                     pokazuje inicjały. Pierścień pulsuje, gdy ktoś mówi. -->
+                                <div x-show="!p.cam && !p.sharing" class="flex flex-col items-center gap-2.5">
+                                    <span class="flex h-20 w-20 items-center justify-center rounded-full text-2xl font-bold text-white transition-shadow"
+                                          :class="p.mowi ? 'ring-4 ring-emerald-400/70' : 'ring-2 ring-slate-700'"
+                                          :style="'background:' + accent(p.color).solid" x-text="initials(p.name)"></span>
+                                    <span class="text-[11px] text-slate-500" x-text="p.mic ? 'bez kamery' : 'mikrofon wyciszony'"></span>
+                                </div>
+
+                                <video x-show="p.cam || p.sharing"
+                                       x-effect="room.strumienTik; podepnijWideo($el, p.peer_id)"
+                                       autoplay playsinline
+                                       class="h-full w-full bg-black object-contain"
+                                       :class="p.me && !p.sharing ? 'scale-x-[-1]' : ''"></video>
+
+                                <div class="pointer-events-none absolute inset-x-0 bottom-0 flex items-center gap-1.5 bg-gradient-to-t from-slate-950/90 to-transparent px-3 pb-2 pt-6">
+                                    <span class="truncate text-xs font-medium"
+                                          x-text="p.name + (p.me ? ' (Ty)' : '')"></span>
+                                    <span x-show="!p.mic" class="text-red-400" title="mikrofon wyciszony"><?= icon('micOff', 'h-3.5 w-3.5') ?></span>
+                                    <span x-show="p.sharing" class="text-brand-400" title="udostępnia ekran"><?= icon('screen', 'h-3.5 w-3.5') ?></span>
+                                    <span x-show="p.mowi && p.mic" class="ml-auto flex h-1.5 w-1.5 rounded-full bg-emerald-400"></span>
+                                </div>
+
+                                <!-- Stan łącza z konkretną osobą, a nie ogólny. -->
+                                <span x-show="!p.me && p.stan && p.stan !== 'connected'" x-cloak
+                                      class="absolute right-2 top-2 rounded-md bg-slate-950/80 px-1.5 py-0.5 text-[10px] font-medium text-amber-300"
+                                      x-text="stanPolaczeniaTekst(p.stan)"></span>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+
+                <!-- ---- Pasek sterowania ---- -->
+                <div class="shrink-0 border-t border-slate-800 px-3 py-3">
+                    <div class="flex flex-wrap items-center justify-center gap-2">
+                        <button @click="przelaczMikrofon()" :disabled="room.mikrofonCzeka"
+                                :title="room.mic ? 'Wycisz mikrofon' : 'Włącz mikrofon'"
+                                :class="room.mic ? 'bg-slate-800 text-slate-100 hover:bg-slate-700' : 'bg-red-600 text-white hover:bg-red-700'"
+                                class="flex h-12 w-12 items-center justify-center rounded-full transition disabled:opacity-60">
+                            <span x-show="room.mikrofonCzeka" class="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent"></span>
+                            <span x-show="!room.mikrofonCzeka && room.mic"><?= icon('mic', 'h-5 w-5') ?></span>
+                            <span x-show="!room.mikrofonCzeka && !room.mic"><?= icon('micOff', 'h-5 w-5') ?></span>
+                        </button>
+
+                        <!-- Kamera jest dodatkiem, nie warunkiem rozmowy: wyłączona
+                             wygląda zwyczajnie, włączona jest wyróżniona kolorem. -->
+                        <button @click="przelaczKamere()" :disabled="room.kameraCzeka"
+                                :title="room.cam ? 'Wyłącz kamerę' : 'Włącz kamerę (opcjonalnie)'"
+                                :class="room.cam ? 'bg-brand-600 text-white hover:bg-brand-700' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'"
+                                class="flex h-12 w-12 items-center justify-center rounded-full transition disabled:opacity-60">
+                            <span x-show="room.kameraCzeka" class="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent"></span>
+                            <span x-show="!room.kameraCzeka && room.cam"><?= icon('video', 'h-5 w-5') ?></span>
+                            <span x-show="!room.kameraCzeka && !room.cam"><?= icon('videoOff', 'h-5 w-5') ?></span>
+                        </button>
+
+                        <button @click="przelaczEkran()" x-show="room.mozeUdostepniac"
+                                :title="room.sharing ? 'Zakończ udostępnianie' : 'Udostępnij ekran'"
+                                :class="room.sharing ? 'bg-brand-600 text-white hover:bg-brand-700' : 'bg-slate-800 text-slate-100 hover:bg-slate-700'"
+                                class="flex h-12 w-12 items-center justify-center rounded-full transition">
+                            <?= icon('screen', 'h-5 w-5') ?>
+                        </button>
+
+                        <button @click="room.notatkiOpen = !room.notatkiOpen"
+                                title="Notatka ze spotkania"
+                                :class="room.notatkiOpen ? 'bg-brand-600 text-white hover:bg-brand-700' : 'bg-slate-800 text-slate-100 hover:bg-slate-700'"
+                                class="flex h-12 w-12 items-center justify-center rounded-full transition lg:hidden">
+                            <?= icon('note', 'h-5 w-5') ?>
+                        </button>
+
+                        <button @click="opuscPokoj()" title="Opuść spotkanie"
+                                class="ml-2 flex items-center gap-2 rounded-full bg-red-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-red-700">
+                            <?= icon('logout', 'h-5 w-5') ?> Wyjdź
+                        </button>
+                    </div>
+
+                    <p x-show="!room.cam && !room.sharing" x-cloak class="mt-2 text-center text-[11px] text-slate-500">
+                        Rozmawiacie głosem. Kamerę włączysz przyciskiem obok — panel prosi o nią
+                        dopiero wtedy, więc do tej chwili jest wolna dla innych programów.
+                    </p>
+                </div>
+            </main>
+
+            <!-- ---- Lista obecnych ---- -->
+            <aside x-show="room.listaOpen" x-cloak
+                   class="shrink-0 border-t border-slate-800 lg:w-64 lg:border-l lg:border-t-0">
+                <div class="p-3">
+                    <h3 class="mb-2 px-1 text-[11px] font-semibold uppercase tracking-wider text-slate-400">W pokoju</h3>
+                    <div class="space-y-1">
+                        <template x-for="p in room.peers" :key="'lista-' + p.peer_id">
+                            <div class="flex items-center gap-2.5 rounded-xl px-2 py-2 hover:bg-slate-900">
+                                <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-white"
+                                      :style="'background:' + accent(p.color).solid" x-text="initials(p.name)"></span>
+                                <span class="min-w-0 flex-1">
+                                    <span class="block truncate text-xs font-medium" x-text="p.name + (p.me ? ' (Ty)' : '')"></span>
+                                    <span class="block text-[10px] text-slate-500"
+                                          x-text="p.me ? 'to Ty' : stanPolaczeniaTekst(p.stan)"></span>
+                                </span>
+                                <span class="flex shrink-0 items-center gap-1">
+                                    <span :class="p.mic ? 'text-slate-500' : 'text-red-400'">
+                                        <span x-show="p.mic"><?= icon('mic', 'h-3.5 w-3.5') ?></span>
+                                        <span x-show="!p.mic"><?= icon('micOff', 'h-3.5 w-3.5') ?></span>
+                                    </span>
+                                    <span :class="p.cam ? 'text-slate-500' : 'text-red-400'">
+                                        <span x-show="p.cam"><?= icon('video', 'h-3.5 w-3.5') ?></span>
+                                        <span x-show="!p.cam"><?= icon('videoOff', 'h-3.5 w-3.5') ?></span>
+                                    </span>
+                                </span>
+                            </div>
+                        </template>
+                    </div>
+
+                    <p x-show="room.peers.length === 1" class="mt-3 rounded-xl bg-slate-900 px-3 py-3 text-[11px] leading-relaxed text-slate-400">
+                        Jesteś w pokoju sam. Wyślij pozostałym link — przycisk <em>Link</em> na karcie spotkania.
+                    </p>
+                </div>
+            </aside>
+
+            <!-- ---- Notatka na żywo ---- -->
+            <aside x-show="room.notatkiOpen" x-cloak
+                   class="flex max-h-[45vh] min-h-0 shrink-0 flex-col border-t border-slate-800 bg-surface p-3 text-ink lg:max-h-none lg:w-96 lg:border-l lg:border-t-0">
+                <div class="mb-2 flex items-center gap-2">
+                    <h3 class="text-[11px] font-semibold uppercase tracking-wider text-faint">Notatka ze spotkania</h3>
+                    <button @click="room.notatkiOpen = false" class="ml-auto rounded-lg p-1 text-faint hover:bg-surface3" aria-label="Zamknij notatkę">
+                        <?= icon('close', 'h-4 w-4') ?>
+                    </button>
+                </div>
+                <div class="min-h-0 flex-1">
+                    <?= meeting_note_editor('') ?>
+                </div>
+            </aside>
+        </div>
+    </div>
+
+    <!-- ==================== UMAWIANIE SPOTKANIA ==================== -->
+    <div x-show="form.open" x-cloak class="fixed inset-0 z-50 grid place-items-end sm:place-items-center">
+        <div x-show="form.open" x-transition.opacity @click="form.open = false" class="absolute inset-0 bg-slate-900/50"></div>
+
+        <!-- Komplet klas przejścia jest obowiązkowy: przy samym „enter”
+             i „enter-start”, bez „enter-end”, Alpine zostawia oknu
+             display:none i mimo otwarcia nic nie widać. -->
+        <form @submit.prevent="zapiszSpotkanie()" x-show="form.open"
+              x-transition:enter="transition duration-200 ease-out" x-transition:enter-start="translate-y-6 opacity-0 sm:scale-95" x-transition:enter-end="translate-y-0 opacity-100 sm:scale-100"
+              class="thin-scroll relative max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-t-3xl border border-line bg-surface shadow-lift sm:rounded-3xl">
+
+            <div class="sticky top-0 z-10 flex items-center gap-3 border-b border-line bg-surface px-5 py-4">
+                <span class="flex h-9 w-9 items-center justify-center rounded-xl bg-brandsoft text-brand-500">
+                    <?= icon('video', 'h-[18px] w-[18px]') ?>
+                </span>
+                <h2 class="text-base font-semibold text-ink" x-text="form.id ? 'Szczegóły spotkania' : 'Nowe spotkanie'"></h2>
+                <button type="button" @click="form.open = false" class="ml-auto rounded-lg p-1.5 text-faint hover:bg-surface3" aria-label="Zamknij">
+                    <?= icon('close', 'h-5 w-5') ?>
+                </button>
+            </div>
+
+            <div class="space-y-5 px-5 py-5">
+
+                <div>
+                    <label class="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-faint">Temat</label>
+                    <input x-model="form.title" type="text" maxlength="120" required
+                           placeholder="np. Przegląd tygodnia"
+                           class="w-full rounded-xl border-line bg-surface2 px-3 py-2.5 text-sm text-ink placeholder:text-faint focus:border-brand-400 focus:ring-2 focus:ring-brand-100 dark:focus:ring-brand-900">
+                </div>
+
+                <div class="grid gap-4 sm:grid-cols-3">
+                    <div>
+                        <label class="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-faint">Data</label>
+                        <input x-model="form.date" type="date" required
+                               class="w-full rounded-xl border-line bg-surface2 px-3 py-2.5 text-sm text-ink focus:border-brand-400 focus:ring-2 focus:ring-brand-100 dark:focus:ring-brand-900">
+                    </div>
+                    <div>
+                        <label class="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-faint">Godzina</label>
+                        <input x-model="form.time" type="time" required
+                               class="w-full rounded-xl border-line bg-surface2 px-3 py-2.5 text-sm text-ink focus:border-brand-400 focus:ring-2 focus:ring-brand-100 dark:focus:ring-brand-900">
+                    </div>
+                    <div>
+                        <label class="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-faint">Czas trwania</label>
+                        <select x-model.number="form.duration_min"
+                                class="w-full rounded-xl border-line bg-surface2 px-3 py-2.5 text-sm text-ink focus:border-brand-400 focus:ring-2 focus:ring-brand-100 dark:focus:ring-brand-900">
+                            <template x-for="d in [15, 30, 45, 60, 90, 120]" :key="d">
+                                <option :value="d" x-text="d + ' min'"></option>
+                            </template>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="flex flex-wrap items-center gap-2">
+                    <span class="text-[11px] text-faint">Szybko:</span>
+                    <button type="button" @click="terminSpotkaniaZa(0)"
+                            class="rounded-lg border border-line px-2.5 py-1.5 text-xs font-medium text-muted transition hover:border-brand-300 hover:text-brand-600">Za chwilę</button>
+                    <button type="button" @click="terminSpotkaniaZa(60)"
+                            class="rounded-lg border border-line px-2.5 py-1.5 text-xs font-medium text-muted transition hover:border-brand-300 hover:text-brand-600">Za godzinę</button>
+                    <button type="button" @click="terminSpotkaniaJutro()"
+                            class="rounded-lg border border-line px-2.5 py-1.5 text-xs font-medium text-muted transition hover:border-brand-300 hover:text-brand-600">Jutro 9:00</button>
+                </div>
+
+                <div>
+                    <label class="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-faint">Agenda / opis</label>
+                    <textarea x-model="form.description" rows="3" maxlength="4000"
+                              placeholder="Co chcemy ustalić?"
+                              class="thin-scroll w-full resize-y rounded-xl border-line bg-surface2 px-3 py-2.5 text-sm leading-relaxed text-ink placeholder:text-faint focus:border-brand-400 focus:ring-2 focus:ring-brand-100 dark:focus:ring-brand-900"></textarea>
+                </div>
+
+                <div>
+                    <label class="mb-1.5 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-faint">
+                        Uczestnicy z zespołu
+                        <span class="normal-case tracking-normal text-faint">— Ty jesteś dodany zawsze</span>
+                    </label>
+                    <div class="flex flex-wrap gap-2">
+                        <template x-for="u in users" :key="u.id">
+                            <button type="button" @click="przelaczUczestnika(u.id)"
+                                    :disabled="u.id === (form.owner_id || me.id)"
+                                    :class="form.user_ids.includes(u.id) ? 'border-transparent' : 'border-line text-ink2 hover:border-linestrong'"
+                                    :style="form.user_ids.includes(u.id) ? chipStyle(u.color) + ';border-color:' + accent(u.color).solid : ''"
+                                    class="flex items-center gap-2 rounded-xl border px-3 py-2 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-70">
+                                <span class="flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-bold text-white"
+                                      :style="'background:' + accent(u.color).solid" x-text="initials(u.name)"></span>
+                                <span x-text="u.name"></span>
+                                <span x-show="form.user_ids.includes(u.id)"><?= icon('check', 'h-3.5 w-3.5') ?></span>
+                            </button>
+                        </template>
+                    </div>
+                </div>
+
+                <div>
+                    <label class="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-faint">Goście spoza panelu</label>
+                    <div class="flex gap-2">
+                        <input x-model="form.emailDraft" type="email" placeholder="adres@example.com"
+                               @keydown.enter.prevent="dodajEmail()"
+                               class="min-w-0 flex-1 rounded-xl border-line bg-surface2 px-3 py-2.5 text-sm text-ink placeholder:text-faint focus:border-brand-400 focus:ring-2 focus:ring-brand-100 dark:focus:ring-brand-900">
+                        <button type="button" @click="dodajEmail()"
+                                class="rounded-xl border border-line px-3 py-2.5 text-xs font-semibold text-muted transition hover:border-brand-300 hover:text-brand-600">
+                            Dodaj
+                        </button>
+                    </div>
+
+                    <div x-show="form.emails.length" x-cloak class="mt-2 flex flex-wrap gap-1.5">
+                        <template x-for="adres in form.emails" :key="adres">
+                            <span class="flex items-center gap-1.5 rounded-lg bg-surface3 px-2 py-1 text-[11px] text-ink2">
+                                <span x-text="adres"></span>
+                                <button type="button" @click="usunEmail(adres)" class="text-faint transition hover:text-red-600" aria-label="Usuń adres">
+                                    <?= icon('close', 'h-3 w-3') ?>
+                                </button>
+                            </span>
+                        </template>
+                    </div>
+
+                    <p class="mt-1.5 text-[11px] leading-relaxed text-faint">
+                        Panel nie wysyła poczty — adresy zapisujemy jako listę zaproszonych.
+                        Link do pokoju skopiujesz przyciskiem <em>Link</em> na karcie spotkania.
+                        Do samego pokoju wchodzą wyłącznie osoby zalogowane w panelu.
+                    </p>
+                </div>
+
+                <div>
+                    <label class="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-faint">Powiąż z folderem</label>
+                    <select x-model="form.folder_id"
+                            class="w-full rounded-xl border-line bg-surface2 px-3 py-2.5 text-sm text-ink focus:border-brand-400 focus:ring-2 focus:ring-brand-100 dark:focus:ring-brand-900">
+                        <option value="">Bez folderu</option>
+                        <template x-for="f in folders" :key="f.id">
+                            <option :value="f.id" x-text="f.name"></option>
+                        </template>
+                    </select>
+                </div>
+
+                <div x-show="form.room_id" x-cloak class="rounded-xl border border-line bg-surface2 p-3">
+                    <p class="text-[11px] font-semibold uppercase tracking-wider text-faint">Link do pokoju</p>
+                    <div class="mt-1.5 flex items-center gap-2">
+                        <code class="min-w-0 flex-1 truncate rounded-lg bg-surface px-2 py-1.5 text-[11px] text-ink2" x-text="linkPokoju(form.room_id)"></code>
+                        <button type="button" @click="kopiujLinkSpotkania({ room_id: form.room_id, title: form.title })"
+                                class="shrink-0 rounded-lg border border-line p-1.5 text-faint transition hover:border-brand-300 hover:text-brand-600" title="Skopiuj">
+                            <?= icon('copy', 'h-3.5 w-3.5') ?>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="sticky bottom-0 flex items-center gap-2 border-t border-line bg-surface px-5 py-4">
+                <button type="button" @click="form.open = false"
+                        class="ml-auto rounded-xl px-4 py-2.5 text-sm font-medium text-muted transition hover:bg-surface3">Anuluj</button>
+                <button type="submit" :disabled="form.saving"
+                        class="rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-lift transition hover:bg-brand-700 disabled:opacity-60">
+                    <span x-text="form.saving ? 'Zapisywanie…' : (form.id ? 'Zapisz zmiany' : 'Umów spotkanie')"></span>
+                </button>
+            </div>
+        </form>
+    </div>
+
+    <!-- ==================== NOTATKA ZE SPOTKANIA ==================== -->
+    <div x-show="notatka.open" x-cloak class="fixed inset-0 z-50 grid place-items-end sm:place-items-center">
+        <div x-show="notatka.open" x-transition.opacity @click="zamknijNotatkeSpotkania()" class="absolute inset-0 bg-slate-900/50"></div>
+
+        <div x-show="notatka.open"
+             x-transition:enter="transition duration-200 ease-out" x-transition:enter-start="translate-y-6 opacity-0 sm:scale-95" x-transition:enter-end="translate-y-0 opacity-100 sm:scale-100"
+             class="relative flex max-h-[92vh] w-full max-w-3xl flex-col rounded-t-3xl border border-line bg-surface shadow-lift sm:rounded-3xl">
+
+            <div class="flex items-center gap-3 border-b border-line px-5 py-4">
+                <span class="flex h-9 w-9 items-center justify-center rounded-xl bg-brandsoft text-brand-500">
+                    <?= icon('note', 'h-[18px] w-[18px]') ?>
+                </span>
+                <div class="min-w-0 flex-1">
+                    <h2 class="truncate text-base font-semibold text-ink" x-text="notatka.title"></h2>
+                    <p class="truncate text-[11px] text-faint" x-text="notatka.podtytul"></p>
+                </div>
+                <button @click="zamknijNotatkeSpotkania()" class="rounded-lg p-1.5 text-faint hover:bg-surface3" aria-label="Zamknij">
+                    <?= icon('close', 'h-5 w-5') ?>
+                </button>
+            </div>
+
+            <!-- Bez flex-1: w kolumnie o wysokości „auto” taki element
+                 zwija się do zera. Wysokość okna wyznacza edytor. -->
+            <div class="min-h-0 overflow-hidden p-5">
+                <?= meeting_note_editor('h-[52vh]') ?>
+            </div>
+        </div>
+    </div>
+
     <!-- ==================== PODGLĄD DOKUMENTU WORDA ==================== -->
     <div x-show="docx.open" x-cloak class="fixed inset-0 z-[56] grid place-items-end sm:place-items-center">
         <div x-show="docx.open" x-transition.opacity @click="docx.open = false" class="absolute inset-0 bg-slate-900/50"></div>
@@ -1571,6 +2426,29 @@ function render_setup_error(string $message): void
     const CSRF    = <?= json_encode($csrf) ?>;
     const NEUTRAL = { solid: '#64748b', soft: '#f1f5f9', ink: '#334155', ring: '#e2e8f0', softDark: '#1e293b', inkDark: '#94a3b8' };
 
+    /*
+     * Wszystko, co należy do WebRTC, trzyma się poza stanem Alpine.
+     * Alpine opakowuje dane w Proxy, a obiekty przeglądarki (MediaStream,
+     * RTCPeerConnection, AudioContext) tego nie znoszą — przypisanie
+     * opakowanego strumienia do <video> po prostu nie zadziała.
+     *
+     * Interfejs dowiaduje się o zmianach przez licznik room.strumienTik.
+     */
+    const MEDIA = {
+        local: null,               // strumień wysyłany dalej (mikrofon + ewentualnie kamera)
+        mikrofon: null,            // surowy strumień z mikrofonu
+        kamera: null,              // surowy strumień z kamery — tylko gdy włączona
+        ekran: null,               // strumień z udostępniania ekranu
+        ice: [],                   // konfiguracja STUN/TURN z serwera
+        zdalne: new Map(),         // peer_id -> MediaStream
+        pc: new Map(),             // peer_id -> RTCPeerConnection
+        kolejkaIce: new Map(),     // kandydaci, którzy przyszli przed ofertą
+        glosy: new Map(),          // peer_id -> czy właśnie mówi
+        analizatory: new Map(),    // peer_id -> { kontekst, timer }
+        petla: null,               // uchwyt pętli odpytującej
+        zegar: null                // uchwyt zegara rozmowy
+    };
+
     document.addEventListener('alpine:init', () => {
         Alpine.data('panel', () => ({
 
@@ -1609,12 +2487,59 @@ function render_setup_error(string $message): void
                 done:  { title: '', assignee_ids: [], priority: 'normal', due_date: '', open: false }
             },
 
-            /* 'folder' — zwykły widok folderu, 'mine' — moje zadania zbiorczo. */
+            /* 'folder' — widok folderu, 'mine' — moje zadania zbiorczo,
+               'calendar' — terminy wszystkich folderów w układzie miesiąca. */
             view: 'folder',
             mineTasks: [],
 
+            /* Kalendarz. Zadania trzymamy osobno od this.tasks, bo pochodzą
+               z wielu folderów naraz i obejmują zakres, a nie jeden folder.
+               rok = 0 znaczy „kalendarza jeszcze nie otwierano”. */
+            kal: {
+                rok: 0,
+                miesiac: 0,          // 0 = styczeń, jak w Date
+                zadania: [],
+                dzien: null,         // rozwinięty dzień, RRRR-MM-DD
+                tylkoMoje: false,
+                ukryjZrobione: false,
+                ladowanie: false
+            },
+
             /* Filtry tablicy — działają po stronie przeglądarki, bez zapytań. */
             filtr: { tekst: '', osoby: [], priorytety: [], tylkoTerminy: false },
+
+
+            /* ------------------------- spotkania -------------------------- */
+
+            spotkania: [],
+            spotkaniaArchiwum: false,
+
+            /* WebRTC i getUserMedia działają wyłącznie w bezpiecznym kontekście.
+               Sprawdzamy to raz i mówimy o tym wprost, zamiast pokazywać
+               tajemniczy błąd dopiero przy próbie włączenia kamery. */
+            bezpiecznyKontekst: true,
+
+            form: {
+                open: false, id: null, owner_id: null, room_id: '',
+                title: '', description: '', date: '', time: '', duration_min: 30,
+                folder_id: '', user_ids: [], emails: [], emailDraft: '', saving: false
+            },
+
+            notatka: {
+                open: false, meetingId: null, title: '', podtytul: '',
+                draft: '', revision: 0, tryb: 'edit', stan: 'idle',
+                konflikt: null, updated_by_name: null, updated_at: null, timer: null
+            },
+
+            room: {
+                open: false, meetingId: null, roomId: '', title: '',
+                peerId: '', cursor: 0, peers: [],
+                mic: true, cam: false, sharing: false, mozeUdostepniac: false,
+                kameraCzeka: false, mikrofonCzeka: false,
+                polaczenie: 'laczenie', statusTekst: 'Łączenie…', ostrzezenie: '',
+                czas: '', listaOpen: false, notatkiOpen: false,
+                strumienTik: 0, hasTurn: false, start: 0
+            },
 
             comments: [],
             commentDraft: '',
@@ -1654,6 +2579,7 @@ function render_setup_error(string $message): void
             /* --------------------------- start --------------------------- */
             async init() {
                 this.dark = document.documentElement.classList.contains('dark');
+                this.bezpiecznyKontekst = !!window.isSecureContext;
                 try { this.metodaWysylki = localStorage.getItem('panel.wysylka'); } catch (e) {}
 
                 this.ask.submit = () => {
@@ -1665,9 +2591,10 @@ function render_setup_error(string $message): void
 
                 try {
                     const d = await this.api('bootstrap');
-                    this.users    = d.users;
-                    this.folders  = d.folders;
-                    this.activity = d.activity;
+                    this.users     = d.users;
+                    this.folders   = d.folders;
+                    this.spotkania = d.meetings || [];
+                    this.activity  = d.activity;
                     this.stamp    = d.stamp;
                     this.limits   = d.limits;
                     this.csrf     = d.csrf;
@@ -1678,6 +2605,14 @@ function render_setup_error(string $message): void
                     if (target) await this.loadFolder(target.id);
 
                     await this.odswiezMoje();
+
+                    /* Wejście z linku „…?room=abc-defg-hij” prowadzi prosto
+                       do pokoju, o ile jest jeszcze otwarty. */
+                    const zAdresu = new URLSearchParams(location.search).get('room');
+                    if (zAdresu) {
+                        history.replaceState({}, '', location.pathname);
+                        await this.otworzZLinku(zAdresu);
+                    }
                 } catch (e) {
                     this.toast(e.message, 'error');
                 } finally {
@@ -1692,8 +2627,26 @@ function render_setup_error(string $message): void
                 });
 
                 setInterval(() => this.poll(), 30000);
+
                 window.addEventListener('beforeunload', e => {
-                    if (this.noteDirty) { e.preventDefault(); e.returnValue = ''; }
+                    if (this.noteDirty || this.room.open) { e.preventDefault(); e.returnValue = ''; }
+                });
+
+                /* Zamknięcie karty w trakcie rozmowy: zdejmujemy siebie z listy
+                   obecnych od razu, żeby pozostali nie patrzyli w martwy kafelek
+                   przez kolejne dwadzieścia sekund. keepalive pozwala żądaniu
+                   dojść, mimo że strona już się zamyka. */
+                window.addEventListener('pagehide', () => {
+                    if (!this.room.open || !this.room.peerId) return;
+                    try {
+                        fetch('api.php?action=meeting.leave', {
+                            method: 'POST',
+                            keepalive: true,
+                            credentials: 'same-origin',
+                            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': this.csrf },
+                            body: JSON.stringify({ peer_id: this.room.peerId })
+                        });
+                    } catch (e) {}
                 });
             },
 
@@ -1769,6 +2722,149 @@ function render_setup_error(string $message): void
                 return grupy.filter(g => g.zadania.length);
             },
 
+            /* ----------------------- kalendarz ---------------------------- */
+
+            /** Nagłówek miesiąca, np. „Sierpień 2026”. */
+            get kalTytul() {
+                if (!this.kal.rok) return '';
+                const nazwa = new Date(this.kal.rok, this.kal.miesiac, 1)
+                    .toLocaleDateString('pl-PL', { month: 'long', year: 'numeric' });
+                return nazwa.charAt(0).toUpperCase() + nazwa.slice(1);
+            },
+
+            /** Poniedziałek otwierający siatkę — bywa w poprzednim miesiącu. */
+            get kalStart() {
+                const pierwszy = new Date(this.kal.rok, this.kal.miesiac, 1, 12);
+                const doTylu = (pierwszy.getDay() + 6) % 7;      // 0 = poniedziałek
+                pierwszy.setDate(pierwszy.getDate() - doTylu);
+                return pierwszy;
+            },
+
+            /** Ile wierszy zajmie miesiąc — 4, 5 albo 6, bez pustego zapasu. */
+            get kalTygodnie() {
+                const dni = new Date(this.kal.rok, this.kal.miesiac + 1, 0).getDate();
+                const doTylu = (new Date(this.kal.rok, this.kal.miesiac, 1).getDay() + 6) % 7;
+                return Math.ceil((doTylu + dni) / 7);
+            },
+
+            /** Zadania po odjęciu tego, co ukryły przełączniki nad kalendarzem. */
+            get kalWidoczne() {
+                return this.kal.zadania.filter(t => {
+                    if (this.kal.ukryjZrobione && t.status === 'done') return false;
+                    if (this.kal.tylkoMoje && !t.assignees.some(a => a.id === this.me.id)) return false;
+                    return true;
+                });
+            },
+
+            get kalPoTerminie() {
+                return this.kalWidoczne.filter(t => this.terminMinal(t.due_date, t.status)).length;
+            },
+
+            /** Mapa data → zadania tego dnia, uporządkowane wewnątrz dnia. */
+            get kalWedlugDni() {
+                const waga = { high: 0, normal: 1, low: 2 };
+                const mapa = {};
+
+                for (const t of this.kalWidoczne) {
+                    if (!mapa[t.due_date]) mapa[t.due_date] = [];
+                    mapa[t.due_date].push(t);
+                }
+
+                for (const klucz in mapa) {
+                    mapa[klucz].sort((a, b) => {
+                        /* Zrobione spadają na dół dnia — zostają dla porządku,
+                           ale nie przesłaniają tego, co wciąż czeka. */
+                        const zrA = a.status === 'done' ? 1 : 0;
+                        const zrB = b.status === 'done' ? 1 : 0;
+                        if (zrA !== zrB) return zrA - zrB;
+
+                        const roznica = (waga[a.priority] ?? 1) - (waga[b.priority] ?? 1);
+                        return roznica !== 0 ? roznica : a.id - b.id;
+                    });
+                }
+                return mapa;
+            },
+
+            /** Kratki siatki: pełne tygodnie od poniedziałku. */
+            get kalSiatka() {
+                if (!this.kal.rok) return [];
+
+                const start = this.kalStart;
+                const ile   = this.kalTygodnie * 7;
+                const dzis  = this.dataZa(0);
+                const wgDni = this.kalWedlugDni;
+
+                const out = [];
+                for (let i = 0; i < ile; i++) {
+                    const d = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i, 12);
+                    const iso = this.isoZDaty(d);
+                    out.push({
+                        iso,
+                        numer: d.getDate(),
+                        wMiesiacu: d.getMonth() === this.kal.miesiac,
+                        dzis: iso === dzis,
+                        zadania: wgDni[iso] || []
+                    });
+                }
+                return out;
+            },
+
+            /** Widok na telefon: same dni miesiąca, w których coś wypada. */
+            get kalAgenda() {
+                return this.kalSiatka
+                    .filter(c => c.wMiesiacu && c.zadania.length)
+                    .map(c => ({ ...c, naglowek: this.kalOpisDnia(c.iso) }));
+            },
+
+            get kalZadaniaDnia() {
+                if (!this.kal.dzien) return [];
+                return this.kalWedlugDni[this.kal.dzien] || [];
+            },
+
+            get kalNaglowekDnia() {
+                return this.kal.dzien ? this.kalOpisDnia(this.kal.dzien) : '';
+            },
+
+
+            /* ------------------------- spotkania -------------------------- */
+
+            get spotkaniaTrwajace() {
+                return this.spotkania.filter(m => m.status === 'live');
+            },
+
+            /** Wszystko, co jeszcze przed nami: zaplanowane, wkrótce i otwarte. */
+            get spotkaniaNadchodzace() {
+                return this.spotkania
+                    .filter(m => ['scheduled', 'soon', 'open'].includes(m.status))
+                    .sort((a, b) => String(a.starts_at_local).localeCompare(String(b.starts_at_local)));
+            },
+
+            get spotkaniaZakonczone() {
+                return this.spotkania
+                    .filter(m => ['ended', 'cancelled'].includes(m.status))
+                    .sort((a, b) => String(b.starts_at_local).localeCompare(String(a.starts_at_local)));
+            },
+
+            /** Sekcje listy. Archiwum pokazujemy dopiero na życzenie. */
+            get spotkaniaWidoczne() {
+                const grupy = [
+                    { klucz: 'live',      etykieta: 'W trakcie',    spotkania: this.spotkaniaTrwajace },
+                    { klucz: 'upcoming',  etykieta: 'Nadchodzące',  spotkania: this.spotkaniaNadchodzace }
+                ];
+                if (this.spotkaniaArchiwum) {
+                    grupy.push({ klucz: 'archive', etykieta: 'Zakończone', spotkania: this.spotkaniaZakonczone });
+                }
+                return grupy.filter(g => g.spotkania.length);
+            },
+
+            /** Siatka kafelków rośnie z liczbą osób, ale nie robi się drobna. */
+            get ukladKafelkow() {
+                const ile = this.room.peers.length;
+                if (ile <= 1) return 'grid-cols-1';
+                if (ile <= 4) return 'grid-cols-1 sm:grid-cols-2';
+                return 'grid-cols-1 sm:grid-cols-2 xl:grid-cols-3';
+            },
+
             /** Załączniki podpięte pod zadanie otwarte w oknie szczegółów. */
             get taskFiles() {
                 if (!this.task.id) return [];
@@ -1819,12 +2915,16 @@ function render_setup_error(string $message): void
             /** Wstawia do stanu te fragmenty odpowiedzi, które przyszły z serwera. */
             apply(d) {
                 if (d.folders)  this.folders  = d.folders;
+                if (d.meetings) this.spotkania = d.meetings;
                 if (d.files)    this.files    = d.files;
                 if (d.tasks) {
                     this.tasks = d.tasks;
-                    /* Licznik „Moje zadania” w bocznym panelu musi nadążać za
-                       zmianami — odświeżamy go w tle, bez blokowania akcji. */
+                    /* Licznik „Moje zadania” i widoczny kalendarz muszą nadążać
+                       za zmianami — odświeżamy je w tle, bez blokowania akcji.
+                       Kalendarz tylko wtedy, gdy jest na ekranie: przy wejściu
+                       w ten widok i tak pobiera dane od nowa. */
                     this.odswiezMoje();
+                    if (this.view === 'calendar') this.kalWczytaj(true);
                 }
                 if (d.activity) {
                     this.activity = d.activity;
@@ -1846,11 +2946,13 @@ function render_setup_error(string $message): void
 
             async refresh() {
                 const d = await this.api('bootstrap');
-                this.folders  = d.folders;
-                this.activity = d.activity;
-                this.stamp    = d.stamp;
+                this.folders   = d.folders;
+                this.spotkania = d.meetings || this.spotkania;
+                this.activity  = d.activity;
+                this.stamp     = d.stamp;
 
                 await this.odswiezMoje();
+                if (this.view === 'calendar') await this.kalWczytaj(true);
 
                 if (this.current) {
                     if (this.folders.some(f => f.id === this.current.id)) {
@@ -1915,10 +3017,11 @@ function render_setup_error(string $message): void
             },
 
             /**
-             * Zadanie z listy zbiorczej otwieramy w jego własnym folderze —
-             * dzięki temu okno ma komplet kontekstu (załączniki, komentarze).
+             * Zadanie z listy zbiorczej (moje zadania, kalendarz) otwieramy w jego
+             * własnym folderze — dzięki temu okno ma komplet kontekstu:
+             * załączniki, komentarze i pliki, które można pod nie podpiąć.
              */
-            async otworzZMoich(t) {
+            async otworzZListy(t) {
                 this.view = 'folder';
                 await this.loadFolder(t.folder_id);
                 const swieze = this.tasks.find(x => x.id === t.id);
@@ -1930,16 +3033,1199 @@ function render_setup_error(string $message): void
                 }
             },
 
+            /* ------------------------- kalendarz -------------------------- */
+
+            async pokazKalendarz() {
+                this.view = 'calendar';
+                this.sidebarOpen = false;
+                if (this.noteDirty) await this.saveNote(true);
+
+                if (!this.kal.rok) {
+                    const teraz = new Date();
+                    this.kal.rok = teraz.getFullYear();
+                    this.kal.miesiac = teraz.getMonth();
+                }
+                await this.kalWczytaj();
+            },
+
+            /**
+             * Pobiera zadania na cały widoczny zakres — łącznie z dniami
+             * z sąsiednich miesięcy, które dopełniają pierwszy i ostatni
+             * tydzień siatki.
+             */
+            async kalWczytaj(quiet = false) {
+                if (!this.kal.rok) return;
+
+                const start = this.kalStart;
+                const koniec = new Date(
+                    start.getFullYear(), start.getMonth(),
+                    start.getDate() + this.kalTygodnie * 7 - 1, 12
+                );
+
+                this.kal.ladowanie = true;
+                try {
+                    const d = await this.api('task.calendar', null, 'GET',
+                        '&from=' + this.isoZDaty(start) + '&to=' + this.isoZDaty(koniec));
+                    this.kal.zadania = d.tasks;
+                } catch (e) {
+                    if (!quiet) this.toast(e.message, 'error');
+                } finally {
+                    this.kal.ladowanie = false;
+                }
+            },
+
+            kalPrzesun(krok) {
+                const d = new Date(this.kal.rok, this.kal.miesiac + krok, 1);
+                this.kal.rok = d.getFullYear();
+                this.kal.miesiac = d.getMonth();
+                this.kal.dzien = null;
+                this.kalWczytaj();
+            },
+
+            kalDzis() {
+                const teraz = new Date();
+                this.kal.rok = teraz.getFullYear();
+                this.kal.miesiac = teraz.getMonth();
+                this.kal.dzien = this.dataZa(0);
+                this.kalWczytaj();
+            },
+
+            /** Kliknięcie w kratkę rozwija dzień; ponowne kliknięcie zwija. */
+            kalWybierzDzien(iso) {
+                this.kal.dzien = this.kal.dzien === iso ? null : iso;
+            },
+
+            /** Opis dnia w nagłówku, np. „poniedziałek, 18 sierpnia”. */
+            kalOpisDnia(iso) {
+                return new Date(iso + 'T12:00:00')
+                    .toLocaleDateString('pl-PL', { weekday: 'long', day: 'numeric', month: 'long' });
+            },
+
+            /** Pasek zadania w kratce — ten sam język kolorów co plakietki terminu. */
+            kalChipStyle(t) {
+                const dni = this.dniDoTerminu(t.due_date);
+
+                let paleta;
+                if (t.status === 'done')          paleta = { jasny: ['#f1f5f9', '#475569'], ciemny: ['#1e293b', '#94a3b8'] };
+                else if (dni !== null && dni < 0) paleta = { jasny: ['#fee2e2', '#b91c1c'], ciemny: ['#450a0a', '#fca5a5'] };
+                else if (dni === 0)               paleta = { jasny: ['#fef3c7', '#b45309'], ciemny: ['#451a03', '#fcd34d'] };
+                else                              paleta = { jasny: ['#eef2ff', '#4338ca'], ciemny: ['#1e1b4b', '#a5b4fc'] };
+
+                const [tlo, tekst] = this.dark ? paleta.ciemny : paleta.jasny;
+                return 'background:' + tlo + ';color:' + tekst;
+            },
+
+            /** Kropka przy pasku — kolor pierwszej osoby odpowiedzialnej. */
+            kalKropka(t) {
+                return t.assignees.length ? this.accent(t.assignees[0].color).solid : '#94a3b8';
+            },
+
+
+            /* ===================== SPOTKANIA — lista ====================== */
+
+            async pokazSpotkania() {
+                this.view = 'meetings';
+                this.sidebarOpen = false;
+                if (this.noteDirty) await this.saveNote(true);
+                await this.odswiezSpotkania(false);
+            },
+
+            async odswiezSpotkania(quiet = true) {
+                try {
+                    const d = await this.api('meeting.list');
+                    this.spotkania = d.meetings;
+                } catch (e) {
+                    if (!quiet) this.toast(e.message, 'error');
+                }
+            },
+
+            znajdzSpotkanie(id) {
+                return this.spotkania.find(m => m.id === id) || null;
+            },
+
+            /**
+             * Wejście z linku „…?room=abc-defg-hij”. Link nie omija logowania:
+             * do tego miejsca dochodzą wyłącznie zalogowane osoby, bo cały
+             * panel jest za formularzem logowania.
+             */
+            async otworzZLinku(roomId) {
+                try {
+                    const d = await this.api('meeting.open', null, 'GET', '&room=' + encodeURIComponent(roomId));
+                    this.view = 'meetings';
+                    await this.odswiezSpotkania();
+
+                    if (d.meeting.can_join) {
+                        await this.wejdzDoPokoju(d.meeting);
+                    } else {
+                        this.toast(d.meeting.join_hint || 'Ten pokój jest zamknięty.', 'error');
+                    }
+                } catch (e) {
+                    this.toast(e.message, 'error');
+                }
+            },
+
+            /* --------------------------- formularz ------------------------ */
+
+            nowSpotkanie() {
+                const teraz = new Date();
+                teraz.setMinutes(teraz.getMinutes() + 30 - (teraz.getMinutes() % 15), 0, 0);
+
+                this.form = {
+                    open: true, id: null, owner_id: this.me.id, room_id: '',
+                    title: '', description: '',
+                    date: this.isoZDaty(teraz),
+                    time: this.godzinaZDaty(teraz),
+                    duration_min: 30,
+                    folder_id: this.view === 'folder' && this.current ? String(this.current.id) : '',
+                    user_ids: [this.me.id], emails: [], emailDraft: '', saving: false
+                };
+            },
+
+            edytujSpotkanie(m) {
+                const [data, godzina] = String(m.starts_at_local || '').split(' ');
+
+                this.form = {
+                    open: true, id: m.id, owner_id: m.created_by, room_id: m.room_id,
+                    title: m.title, description: m.description || '',
+                    date: data || '', time: (godzina || '').slice(0, 5),
+                    duration_min: m.duration_min,
+                    folder_id: m.folder_id ? String(m.folder_id) : '',
+                    user_ids: m.participants.filter(u => u.user_id).map(u => u.user_id),
+                    emails: m.participants.filter(u => u.email).map(u => u.email),
+                    emailDraft: '', saving: false
+                };
+            },
+
+            async zapiszSpotkanie() {
+                if (this.form.saving) return;
+
+                if (!this.form.title.trim()) { this.toast('Podaj temat spotkania.', 'error'); return; }
+                if (!this.form.date)         { this.toast('Podaj datę spotkania.', 'error'); return; }
+                if (!this.form.time)         { this.toast('Podaj godzinę spotkania.', 'error'); return; }
+
+                /* Adres wpisany, ale niezatwierdzony Enterem, i tak ma trafić na listę —
+                   inaczej użytkownik traci go bez ostrzeżenia. */
+                if (this.form.emailDraft.trim()) this.dodajEmail();
+
+                const dane = {
+                    title: this.form.title,
+                    description: this.form.description,
+                    date: this.form.date,
+                    time: this.form.time,
+                    duration_min: Number(this.form.duration_min) || 30,
+                    folder_id: this.form.folder_id === '' ? null : Number(this.form.folder_id),
+                    user_ids: this.form.user_ids,
+                    emails: this.form.emails
+                };
+
+                this.form.saving = true;
+                try {
+                    if (this.form.id) {
+                        dane.id = this.form.id;
+                        this.apply(await this.api('meeting.update', dane, 'POST'));
+                        this.toast('Spotkanie zaktualizowane.');
+                    } else {
+                        this.apply(await this.api('meeting.create', dane, 'POST'));
+                        this.toast('Spotkanie umówione.');
+                    }
+                    this.form.open = false;
+                } catch (e) {
+                    this.toast(e.message, 'error');
+                } finally {
+                    this.form.saving = false;
+                }
+            },
+
+            usunSpotkanie(m) {
+                this.confirm({
+                    title: 'Usunąć spotkanie?',
+                    message: 'Zniknie razem z notatką i listą uczestników. Tego nie da się cofnąć.',
+                    confirmText: 'Usuń',
+                    onOk: async () => {
+                        try {
+                            this.apply(await this.api('meeting.delete', { id: m.id }, 'POST'));
+                            this.toast('Spotkanie usunięte.');
+                        } catch (e) { this.toast(e.message, 'error'); }
+                    }
+                });
+            },
+
+            async zmienStatusSpotkania(m, status) {
+                try {
+                    this.apply(await this.api('meeting.update', { id: m.id, status }, 'POST'));
+                    this.toast(status === 'cancelled' ? 'Spotkanie odwołane.' : 'Spotkanie przywrócone.');
+                } catch (e) { this.toast(e.message, 'error'); }
+            },
+
+            przelaczUczestnika(id) {
+                /* Twórcy nie da się usunąć — i tak zostanie dopisany po stronie serwera. */
+                if (id === (this.form.owner_id || this.me.id)) return;
+
+                const i = this.form.user_ids.indexOf(id);
+                if (i === -1) this.form.user_ids.push(id);
+                else this.form.user_ids.splice(i, 1);
+            },
+
+            dodajEmail() {
+                const adres = this.form.emailDraft.trim().toLowerCase();
+                if (!adres) return;
+
+                if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(adres)) {
+                    this.toast('To nie wygląda na adres e-mail.', 'error');
+                    return;
+                }
+                if (!this.form.emails.includes(adres)) this.form.emails.push(adres);
+                this.form.emailDraft = '';
+            },
+
+            usunEmail(adres) {
+                this.form.emails = this.form.emails.filter(a => a !== adres);
+            },
+
+            /* --------------------- skróty terminu ------------------------- */
+
+            godzinaZDaty(d) {
+                return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+            },
+
+            terminSpotkaniaZa(minut) {
+                const d = new Date();
+                d.setMinutes(d.getMinutes() + minut, 0, 0);
+                this.form.date = this.isoZDaty(d);
+                this.form.time = this.godzinaZDaty(d);
+            },
+
+            terminSpotkaniaJutro() {
+                const d = new Date();
+                d.setDate(d.getDate() + 1);
+                d.setHours(9, 0, 0, 0);
+                this.form.date = this.isoZDaty(d);
+                this.form.time = '09:00';
+            },
+
+            /* --------------------------- prezentacja ---------------------- */
+
+            linkPokoju(roomId) {
+                return location.origin + location.pathname + '?room=' + encodeURIComponent(roomId);
+            },
+
+            async kopiujLinkSpotkania(m) {
+                const link = this.linkPokoju(m.room_id);
+                try {
+                    await navigator.clipboard.writeText(link);
+                    this.toast('Link skopiowany do schowka.');
+                } catch (e) {
+                    /* Schowek bywa zablokowany (brak HTTPS, odmowa uprawnień) —
+                       wtedy pokazujemy link do ręcznego skopiowania. */
+                    this.prompt({
+                        title: 'Link do pokoju',
+                        message: 'Skopiuj i wyślij pozostałym uczestnikom.',
+                        value: link,
+                        confirmText: 'Gotowe',
+                        onOk: () => {}
+                    });
+                }
+            },
+
+            /** „dziś 14:30”, „jutro 9:00”, „pt, 22 sie, 10:00”. */
+            terminSpotkania(m) {
+                const surowa = String(m.starts_at_local || '');
+                const [data, godzina] = surowa.split(' ');
+                const hhmm = (godzina || '').slice(0, 5);
+                const dni = this.dniDoTerminu(data);
+
+                if (dni === 0)  return 'dziś ' + hhmm;
+                if (dni === 1)  return 'jutro ' + hhmm;
+                if (dni === -1) return 'wczoraj ' + hhmm;
+
+                const opis = new Date(data + 'T12:00:00')
+                    .toLocaleDateString('pl-PL', { weekday: 'short', day: 'numeric', month: 'short' });
+                return opis + ', ' + hhmm;
+            },
+
+            statusSpotkaniaNazwa(status) {
+                const nazwy = {
+                    live: 'trwa', open: 'pokój otwarty', soon: 'wkrótce',
+                    scheduled: 'zaplanowane', ended: 'zakończone', cancelled: 'odwołane'
+                };
+                return nazwy[status] || status;
+            },
+
+            statusSpotkaniaStyl(status) {
+                const paleta = {
+                    live:      { jasny: ['#ecfdf5', '#047857'], ciemny: ['#022c22', '#6ee7b7'] },
+                    open:      { jasny: ['#eef2ff', '#4338ca'], ciemny: ['#1e1b4b', '#a5b4fc'] },
+                    soon:      { jasny: ['#fffbeb', '#b45309'], ciemny: ['#451a03', '#fcd34d'] },
+                    scheduled: { jasny: ['#f1f5f9', '#475569'], ciemny: ['#334155', '#cbd5e1'] },
+                    ended:     { jasny: ['#f1f5f9', '#475569'], ciemny: ['#334155', '#cbd5e1'] },
+                    cancelled: { jasny: ['#fef2f2', '#b91c1c'], ciemny: ['#450a0a', '#fca5a5'] }
+                };
+                const c = paleta[status] || paleta.scheduled;
+                const [tlo, tekst] = this.dark ? c.ciemny : c.jasny;
+                return 'background:' + tlo + ';color:' + tekst;
+            },
+
+            odmianaSpotkan(n) {
+                if (n === 1) return '1 spotkanie';
+                const setki = n % 100;
+                const jednosci = n % 10;
+                return (jednosci >= 2 && jednosci <= 4 && (setki < 12 || setki > 14))
+                    ? n + ' spotkania'
+                    : n + ' spotkań';
+            },
+
+            odmianaOsob(n) {
+                if (n === 1) return '1 osoba';
+                const setki = n % 100;
+                const jednosci = n % 10;
+                return (jednosci >= 2 && jednosci <= 4 && (setki < 12 || setki > 14))
+                    ? n + ' osoby'
+                    : n + ' osób';
+            },
+
+            /* ================= SPOTKANIA — notatka ======================== */
+
+            async otworzNotatkeSpotkania(m) {
+                this.notatka.open = true;
+                this.notatka.meetingId = m.id;
+                this.notatka.title = m.title;
+                this.notatka.podtytul = this.terminSpotkania(m) + ' · ' + m.duration_min + ' min';
+                this.notatka.konflikt = null;
+                this.notatka.stan = 'idle';
+
+                await this.wczytajNotatke(m.id);
+
+                /* Pusta notatka otwiera się od razu do pisania, wypełniona
+                   w podglądzie — tak samo jak notatka folderu. */
+                this.notatka.tryb = this.notatka.draft.trim() ? 'view' : 'edit';
+            },
+
+            async wczytajNotatke(meetingId) {
+                try {
+                    const d = await this.api('meeting.open', null, 'GET', '&id=' + encodeURIComponent(meetingId));
+                    this.przyjmijNotatke(d.note);
+                } catch (e) {
+                    this.toast(e.message, 'error');
+                }
+            },
+
+            przyjmijNotatke(note) {
+                this.notatka.draft = note.content || '';
+                this.notatka.revision = note.revision || 0;
+                this.notatka.updated_by_name = note.updated_by_name;
+                this.notatka.updated_at = note.updated_at;
+            },
+
+            async zamknijNotatkeSpotkania() {
+                /* Zamknięcie okna nie może zgubić tego, co czeka na autozapis. */
+                if (this.notatka.stan === 'dirty') {
+                    clearTimeout(this.notatka.timer);
+                    await this.zapiszNotatke();
+                }
+                this.notatka.open = false;
+                await this.odswiezSpotkania();
+            },
+
+            /** Każde uderzenie w klawisz odsuwa zapis; zapisujemy po chwili ciszy. */
+            notatkaZmieniona() {
+                this.notatka.stan = 'dirty';
+                clearTimeout(this.notatka.timer);
+                this.notatka.timer = setTimeout(() => this.zapiszNotatke(), 1200);
+            },
+
+            async zapiszNotatke(force = false) {
+                if (!this.notatka.meetingId) return;
+                if (this.notatka.stan === 'saving') return;
+
+                this.notatka.stan = 'saving';
+                try {
+                    const d = await this.api('meeting.note', {
+                        meeting_id: this.notatka.meetingId,
+                        content: this.notatka.draft,
+                        revision: this.notatka.revision,
+                        force: force
+                    }, 'POST');
+
+                    if (d.saved) {
+                        this.notatka.revision = d.note.revision;
+                        this.notatka.updated_by_name = d.note.updated_by_name;
+                        this.notatka.updated_at = d.note.updated_at;
+                        this.notatka.konflikt = null;
+                        this.notatka.stan = 'saved';
+                    } else {
+                        /* Ktoś zapisał swoją wersję w międzyczasie. Jeśli sami nic
+                           nie zmienialiśmy, po prostu przyjmujemy jego tekst —
+                           dzięki temu notatka jest żywa dla wszystkich patrzących.
+                           Gdy mamy własne zmiany, decyzję zostawiamy człowiekowi. */
+                        const nasze = this.notatka.draft;
+                        if (nasze === '' || nasze === d.note.content) {
+                            this.przyjmijNotatke(d.note);
+                            this.notatka.stan = 'saved';
+                        } else {
+                            this.notatka.konflikt = d.note;
+                            this.notatka.stan = 'error';
+                        }
+                    }
+                } catch (e) {
+                    this.notatka.stan = 'error';
+                    this.toast('Nie udało się zapisać notatki: ' + e.message, 'error');
+                }
+            },
+
+            zapiszNotatkeSilowo() {
+                this.notatka.revision = this.notatka.konflikt ? this.notatka.konflikt.revision : this.notatka.revision;
+                this.notatka.konflikt = null;
+                this.zapiszNotatke(true);
+            },
+
+            wczytajWersjeSerwera() {
+                if (!this.notatka.konflikt) return;
+                this.przyjmijNotatke(this.notatka.konflikt);
+                this.notatka.konflikt = null;
+                this.notatka.stan = 'saved';
+            },
+
+            notatkaStanTekst() {
+                const stany = {
+                    idle:   'autozapis włączony',
+                    dirty:  'niezapisane zmiany…',
+                    saving: 'zapisywanie…',
+                    saved:  'zapisano',
+                    error:  'zapis się nie powiódł'
+                };
+                return stany[this.notatka.stan] || '';
+            },
+
+            /** Notatka w pokoju odświeża się w tle, żeby wszyscy widzieli to samo. */
+            async odswiezNotatkeWTle() {
+                if (!this.notatka.meetingId) return;
+                if (this.notatka.stan === 'dirty' || this.notatka.stan === 'saving') return;
+                if (this.notatka.konflikt) return;
+
+                try {
+                    const d = await this.api('meeting.open', null, 'GET',
+                        '&id=' + encodeURIComponent(this.notatka.meetingId));
+                    if (d.note.revision !== this.notatka.revision) {
+                        this.przyjmijNotatke(d.note);
+                    }
+                } catch (e) { /* przy następnym cyklu */ }
+            },
+
+            /* ==================== POKÓJ WIDEO (WebRTC) ==================== *
+             *
+             * Obraz i dźwięk idą bezpośrednio między przeglądarkami — serwer
+             * pośredniczy wyłącznie w nawiązaniu połączenia. Skrzynka na
+             * wiadomości sygnalizacyjne leży w bazie, a przeglądarki
+             * odpytują ją przez api.php; hosting współdzielony nie daje
+             * WebSocketów, a przy czteroosobowym zespole odpytywanie co
+             * sekundę jest w zupełności wystarczające.
+             *
+             * Połączenie każdy z każdym (siatka): przy czterech osobach to
+             * trzy strumienie wychodzące na osobę — bez serwera przekazującego.
+             * ------------------------------------------------------------- */
+
+            async wejdzDoPokoju(m) {
+                if (this.room.open) return;
+
+                if (!window.isSecureContext) {
+                    this.toast('Wideorozmowy wymagają HTTPS. Włącz certyfikat SSL w panelu hostingu.', 'error');
+                    return;
+                }
+                if (!navigator.mediaDevices || !window.RTCPeerConnection) {
+                    this.toast('Ta przeglądarka nie obsługuje wideorozmów.', 'error');
+                    return;
+                }
+
+                this.room.open = true;
+                this.room.meetingId = m.id;
+                this.room.roomId = m.room_id;
+                this.room.title = m.title;
+                this.room.peerId = this.nowyPeerId();
+                this.room.peers = [];
+                this.room.cursor = 0;
+                this.room.mic = true;
+                this.room.cam = false;      // kamerę włącza się świadomie, przyciskiem
+                this.room.sharing = false;
+                this.room.kameraCzeka = false;
+                this.room.mikrofonCzeka = false;
+                this.room.ostrzezenie = '';
+                this.room.polaczenie = 'laczenie';
+                this.room.statusTekst = 'Pytam o mikrofon…';
+                this.room.mozeUdostepniac = !!(navigator.mediaDevices.getDisplayMedia);
+                this.room.notatkiOpen = window.innerWidth >= 1024;
+                this.room.listaOpen = false;
+
+                await this.pobierzMedia();
+
+                try {
+                    this.room.statusTekst = 'Wchodzę do pokoju…';
+                    const d = await this.api('meeting.join',
+                        { id: m.id, peer_id: this.room.peerId }, 'POST');
+
+                    MEDIA.ice = d.ice_servers || [];
+                    this.room.hasTurn = !!d.has_turn;
+                    this.room.cursor = d.cursor || 0;
+                    this.room.start = Date.now();
+                    this.spotkania = d.meetings;
+
+                    /* Notatka jedzie razem z pokojem — panel boczny ma być
+                       gotowy do pisania od pierwszej sekundy rozmowy. */
+                    this.notatka.meetingId = m.id;
+                    this.notatka.title = m.title;
+                    this.notatka.podtytul = 'notatka na żywo';
+                    this.notatka.konflikt = null;
+                    this.notatka.stan = 'idle';
+                    this.notatka.tryb = 'edit';
+                    this.przyjmijNotatke(d.note);
+
+                    this.zsynchronizujPeery(d.peers);
+                    this.room.polaczenie = 'ok';
+                    this.room.statusTekst = 'W pokoju';
+
+                    this.startPetli();
+                    this.startZegara();
+                } catch (e) {
+                    this.toast(e.message, 'error');
+                    await this.opuscPokoj();
+                }
+            },
+
+            nowyPeerId() {
+                const bufor = new Uint8Array(12);
+                crypto.getRandomValues(bufor);
+                return Array.from(bufor).map(b => b.toString(16).padStart(2, '0')).join('');
+            },
+
+            /**
+             * Wejście do pokoju bierze wyłącznie mikrofon. Kamera zostaje
+             * wyłączona i włącza się ją przyciskiem — dzięki temu rozmowa
+             * rusza nawet wtedy, gdy kamerę trzyma inny program, a przy
+             * okazji panel nie zajmuje jej bez potrzeby.
+             *
+             * Brak mikrofonu też nie zamyka drogi do pokoju: można wejść,
+             * słuchać i pisać notatkę.
+             */
+            async pobierzMedia() {
+                /* Stały pojemnik na to, co wysyłamy dalej. Trzymamy go nawet
+                   pusty, bo do niego przypina się identyfikator strumienia
+                   po stronie odbiorców. */
+                MEDIA.local = new MediaStream();
+
+                try {
+                    MEDIA.mikrofon = await navigator.mediaDevices.getUserMedia({
+                        audio: { echoCancellation: true, noiseSuppression: true }
+                    });
+                    MEDIA.mikrofon.getAudioTracks().forEach(t => MEDIA.local.addTrack(t));
+                    this.sledzGlos(this.room.peerId, MEDIA.local);
+                    this.room.mic = true;
+                } catch (e) {
+                    this.room.mic = false;
+                    this.room.ostrzezenie = this.opisBleduMedia(e, 'mikrofonu')
+                        + ' Możesz zostać w pokoju — będziesz słyszeć innych i pisać notatkę.';
+                }
+                return true;
+            },
+
+            /**
+             * Komunikat dopasowany do przyczyny. „Odmowa”, „urządzenie zajęte”
+             * i „brak sprzętu” wymagają zupełnie różnych działań, więc nie ma
+             * sensu zbywać ich jednym zdaniem.
+             */
+            opisBleduMedia(e, czego) {
+                const nazwa = e && e.name ? e.name : '';
+
+                if (nazwa === 'NotAllowedError') {
+                    return 'Przeglądarka nie dostała zgody na użycie ' + czego
+                        + '. Kliknij kłódkę obok adresu strony i zezwól na dostęp.';
+                }
+                if (nazwa === 'NotReadableError' || nazwa === 'AbortError') {
+                    return 'Urządzenie jest zajęte przez inny program (Teams, Zoom, Skype, OBS, aparat systemowy). '
+                        + 'Zamknij go i spróbuj jeszcze raz.';
+                }
+                if (nazwa === 'NotFoundError' || nazwa === 'OverconstrainedError') {
+                    return 'Nie znaleziono urządzenia: ' + czego + '.';
+                }
+                if (nazwa === 'SecurityError') {
+                    return 'Dostęp jest zablokowany ustawieniami strony (nagłówek Permissions-Policy w pliku .htaccess).';
+                }
+                return 'Nie udało się użyć ' + czego + (nazwa ? ' (' + nazwa + ')' : '') + '.';
+            },
+
+            /* ---------------------- pętla sygnalizacji -------------------- */
+
+            startPetli() {
+                clearTimeout(MEDIA.petla);
+
+                const tik = async () => {
+                    if (!this.room.open) return;
+
+                    let odstep = 3000;
+                    try {
+                        const d = await this.api('rtc.poll', {
+                            peer_id: this.room.peerId,
+                            since: this.room.cursor,
+                            mic: this.room.mic,
+                            cam: this.room.cam,
+                            sharing: this.room.sharing
+                        }, 'POST');
+
+                        if (d.rejoin) {
+                            this.toast('Połączenie z pokojem wygasło.', 'error');
+                            await this.opuscPokoj();
+                            return;
+                        }
+                        if (d.closed) {
+                            this.toast('Spotkanie zostało zakończone.');
+                            await this.opuscPokoj();
+                            return;
+                        }
+
+                        this.room.cursor = d.cursor;
+                        this.room.polaczenie = 'ok';
+                        this.zsynchronizujPeery(d.peers);
+
+                        for (const sygnal of d.signals) {
+                            await this.obsluzSygnal(sygnal);
+                        }
+
+                        /* Dopóki cokolwiek się jeszcze zestawia, pytamy częściej. */
+                        const czekaja = this.room.peers.some(p => !p.me && p.stan !== 'connected');
+                        odstep = czekaja ? 1000 : 3000;
+                    } catch (e) {
+                        this.room.polaczenie = 'blad';
+                        this.room.statusTekst = 'Brak łączności z serwerem';
+                        odstep = 4000;
+                    }
+
+                    MEDIA.petla = setTimeout(tik, odstep);
+                };
+
+                MEDIA.petla = setTimeout(tik, 700);
+            },
+
+            startZegara() {
+                clearInterval(MEDIA.zegar);
+                MEDIA.zegar = setInterval(() => {
+                    if (!this.room.open || !this.room.start) return;
+
+                    const sekundy = Math.floor((Date.now() - this.room.start) / 1000);
+                    const mm = String(Math.floor(sekundy / 60)).padStart(2, '0');
+                    const ss = String(sekundy % 60).padStart(2, '0');
+                    this.room.czas = mm + ':' + ss;
+
+                    /* Notatkę dociągamy rzadziej niż sygnalizację — wystarczy,
+                       żeby wszyscy widzieli mniej więcej to samo. */
+                    if (sekundy % 5 === 0 && this.room.notatkiOpen) this.odswiezNotatkeWTle();
+
+                    if (sekundy === 20) this.sprawdzJakoscPolaczen();
+                }, 1000);
+            },
+
+            /**
+             * Po kilkunastu sekundach wiadomo już, czy siatka się zestawiła.
+             * Jeżeli nie — najczęstszą przyczyną jest sieć, która nie
+             * przepuszcza połączeń bezpośrednich, a lekarstwem serwer TURN.
+             */
+            sprawdzJakoscPolaczen() {
+                const zepsute = this.room.peers.filter(p => !p.me && p.stan !== 'connected');
+                if (!zepsute.length) return;
+
+                this.room.ostrzezenie = this.room.hasTurn
+                    ? 'Część połączeń nie chce się zestawić. Sprawdź, czy serwer TURN w db.php odpowiada.'
+                    : 'Nie udało się połączyć bezpośrednio z każdym. Taka sieć wymaga serwera TURN — wpisz go w stałej TURN_SERVERS w db.php (opis w README, rozdział o spotkaniach).';
+            },
+
+            /* --------------------- utrzymanie siatki ---------------------- */
+
+            zsynchronizujPeery(lista) {
+                const obecni = lista.map(p => p.peer_id);
+
+                /* Ktoś wyszedł — zamykamy połączenie i zwalniamy strumień. */
+                for (const peerId of Array.from(MEDIA.pc.keys())) {
+                    if (!obecni.includes(peerId)) this.rozlacz(peerId);
+                }
+
+                this.room.peers = lista.map(p => {
+                    const pc = MEDIA.pc.get(p.peer_id);
+                    return Object.assign({}, p, {
+                        stan: p.me ? 'connected' : (pc ? pc.connectionState : 'new'),
+                        mowi: MEDIA.glosy.get(p.peer_id) || false
+                    });
+                });
+
+                /* Nowi: łączymy się z każdym, kogo jeszcze nie mamy.
+                   Ofertę składa ten o mniejszym identyfikatorze — bez tej
+                   umowy obie strony wysłałyby ofertę naraz i połączenie
+                   rozsypałoby się na kolizji. */
+                for (const p of lista) {
+                    if (p.me || MEDIA.pc.has(p.peer_id)) continue;
+                    this.polaczZ(p.peer_id, this.room.peerId < p.peer_id);
+                }
+            },
+
+            polaczZ(peerId, inicjuje) {
+                const pc = new RTCPeerConnection({ iceServers: MEDIA.ice });
+                MEDIA.pc.set(peerId, pc);
+                MEDIA.kolejkaIce.set(peerId, []);
+
+                /* Układ torów ustala wyłącznie strona składająca ofertę:
+                   najpierw dźwięk, potem obraz. Obie strony zakładające tory
+                   niezależnie od siebie kończą tak, że jedna nadaje na torze,
+                   którego druga w ogóle nie czyta — i kamera włączona w trakcie
+                   rozmowy nigdzie nie dociera.
+
+                   Tory powstają od razu, nawet gdy kamera jest wyłączona,
+                   a mikrofonu nie udało się dostać. Dzięki temu włączenie
+                   czegokolwiek później to sama podmiana ścieżki, bez
+                   negocjacji od nowa — która przez sygnalizację opartą
+                   o odpytywanie byłaby wolna i zawodna. */
+                if (inicjuje) {
+                    pc.addTransceiver('audio', { direction: 'sendrecv', streams: [MEDIA.local] });
+                    pc.addTransceiver('video', { direction: 'sendrecv', streams: [MEDIA.local] });
+                    this.wyslijNaszeSciezki(pc);
+                }
+
+                pc.onicecandidate = (e) => {
+                    if (e.candidate) this.wyslijSygnal(peerId, 'ice', e.candidate.toJSON());
+                };
+
+                pc.ontrack = (e) => {
+                    /* Ścieżka dołożona przez replaceTrack do wcześniej
+                       utworzonego toru potrafi przyjść bez przypisanego
+                       strumienia — wtedy składamy go sami. */
+                    let strumien = e.streams[0];
+                    if (!strumien) {
+                        strumien = MEDIA.zdalne.get(peerId) || new MediaStream();
+                        if (!strumien.getTracks().includes(e.track)) strumien.addTrack(e.track);
+                    }
+
+                    MEDIA.zdalne.set(peerId, strumien);
+                    if (e.track.kind === 'audio') this.sledzGlos(peerId, strumien);
+                    this.room.strumienTik++;
+                };
+
+                pc.onconnectionstatechange = () => {
+                    const wpis = this.room.peers.find(p => p.peer_id === peerId);
+                    if (wpis) wpis.stan = pc.connectionState;
+
+                    /* Zerwane łącze potrafi wrócić samo; przy „failed” trzeba
+                       zestawić połączenie od nowa. */
+                    if (pc.connectionState === 'failed') {
+                        this.rozlacz(peerId);
+                        setTimeout(() => {
+                            if (this.room.open && this.room.peers.some(p => p.peer_id === peerId)) {
+                                this.polaczZ(peerId, this.room.peerId < peerId);
+                            }
+                        }, 1200);
+                    }
+                };
+
+                if (inicjuje) {
+                    pc.onnegotiationneeded = async () => {
+                        try {
+                            const oferta = await pc.createOffer();
+                            await pc.setLocalDescription(oferta);
+                            this.wyslijSygnal(peerId, 'offer', { type: oferta.type, sdp: oferta.sdp });
+                        } catch (e) { /* przy kolejnej próbie */ }
+                    };
+                }
+
+                return pc;
+            },
+
+            rozlacz(peerId) {
+                const pc = MEDIA.pc.get(peerId);
+                if (pc) {
+                    pc.onicecandidate = null;
+                    pc.ontrack = null;
+                    pc.onconnectionstatechange = null;
+                    pc.onnegotiationneeded = null;
+                    try { pc.close(); } catch (e) {}
+                }
+                MEDIA.pc.delete(peerId);
+                MEDIA.zdalne.delete(peerId);
+                MEDIA.kolejkaIce.delete(peerId);
+                MEDIA.glosy.delete(peerId);
+                this.zamknijAnalizator(peerId);
+                this.room.strumienTik++;
+            },
+
+            /**
+             * Wkłada to, co akurat nadajemy, na istniejące tory połączenia.
+             * Wywoływane po zestawieniu torów oraz po każdej zmianie źródła.
+             */
+            wyslijNaszeSciezki(pc) {
+                const dzwiek = MEDIA.local ? MEDIA.local.getAudioTracks()[0] : null;
+                const obraz = MEDIA.ekran
+                    ? MEDIA.ekran.getVideoTracks()[0]
+                    : (MEDIA.kamera ? MEDIA.kamera.getVideoTracks()[0] : null);
+
+                for (const tor of pc.getTransceivers()) {
+                    const czego = (tor.sender.track && tor.sender.track.kind)
+                        || (tor.receiver.track && tor.receiver.track.kind);
+
+                    if (czego === 'audio') tor.sender.replaceTrack(dzwiek || null).catch(() => {});
+                    if (czego === 'video') tor.sender.replaceTrack(obraz || null).catch(() => {});
+                }
+            },
+
+            async wyslijSygnal(doKogo, kind, payload) {
+                try {
+                    await this.api('rtc.signal', {
+                        peer_id: this.room.peerId, to: doKogo, kind, payload
+                    }, 'POST');
+                } catch (e) {
+                    /* Adresat mógł właśnie wyjść — pętla i tak to wychwyci. */
+                }
+            },
+
+            async obsluzSygnal(sygnal) {
+                const peerId = sygnal.from;
+                let pc = MEDIA.pc.get(peerId);
+
+                if (!pc) {
+                    /* Oferta od kogoś, kogo jeszcze nie widzieliśmy na liście. */
+                    if (sygnal.kind !== 'offer') return;
+                    pc = this.polaczZ(peerId, false);
+                }
+
+                try {
+                    if (sygnal.kind === 'offer') {
+                        await pc.setRemoteDescription(new RTCSessionDescription(sygnal.payload));
+                        await this.wypuscKolejkeIce(peerId, pc);
+
+                        /* Tory powstałe z oferty są jednokierunkowe. Zgłaszamy
+                           na nich gotowość do nadawania jeszcze przed złożeniem
+                           odpowiedzi — inaczej włączenie kamery w trakcie
+                           rozmowy wymagałoby negocjacji od nowa. */
+                        for (const tor of pc.getTransceivers()) {
+                            if (tor.direction === 'recvonly') tor.direction = 'sendrecv';
+                        }
+                        this.wyslijNaszeSciezki(pc);
+
+                        const odpowiedz = await pc.createAnswer();
+                        await pc.setLocalDescription(odpowiedz);
+                        this.wyslijSygnal(peerId, 'answer', { type: odpowiedz.type, sdp: odpowiedz.sdp });
+                    } else if (sygnal.kind === 'answer') {
+                        if (pc.signalingState === 'have-local-offer') {
+                            await pc.setRemoteDescription(new RTCSessionDescription(sygnal.payload));
+                            await this.wypuscKolejkeIce(peerId, pc);
+                        }
+                    } else if (sygnal.kind === 'ice') {
+                        /* Kandydaci potrafią przyjść przed ofertą — wtedy
+                           odkładamy je do czasu ustawienia opisu zdalnego. */
+                        if (pc.remoteDescription && pc.remoteDescription.type) {
+                            await pc.addIceCandidate(new RTCIceCandidate(sygnal.payload));
+                        } else {
+                            (MEDIA.kolejkaIce.get(peerId) || []).push(sygnal.payload);
+                        }
+                    }
+                } catch (e) {
+                    /* Pojedynczy zgubiony sygnał nie może wywrócić całej rozmowy. */
+                }
+            },
+
+            async wypuscKolejkeIce(peerId, pc) {
+                const kolejka = MEDIA.kolejkaIce.get(peerId) || [];
+                for (const kandydat of kolejka) {
+                    try { await pc.addIceCandidate(new RTCIceCandidate(kandydat)); } catch (e) {}
+                }
+                MEDIA.kolejkaIce.set(peerId, []);
+            },
+
+            /* ------------------------- sterowanie ------------------------- */
+
+            /** Odbicie własnego stanu na kafelku — bez czekania na odpytanie. */
+            odswiezSwojKafelek() {
+                const ja = this.room.peers.find(p => p.me);
+                if (!ja) return;
+                ja.mic = this.room.mic;
+                ja.cam = this.room.cam;
+                ja.sharing = this.room.sharing;
+            },
+
+            async przelaczMikrofon() {
+                /* Mikrofonu mogło zabraknąć przy wejściu (zajęty, brak zgody).
+                   Kliknięcie przycisku to naturalny moment, żeby spróbować
+                   jeszcze raz — na przykład po zamknięciu drugiego programu. */
+                if (!MEDIA.mikrofon) { await this.wlaczMikrofon(); return; }
+
+                this.room.mic = !this.room.mic;
+                MEDIA.local.getAudioTracks().forEach(t => { t.enabled = this.room.mic; });
+                this.odswiezSwojKafelek();
+            },
+
+            async wlaczMikrofon() {
+                if (this.room.mikrofonCzeka) return;
+                this.room.mikrofonCzeka = true;
+
+                try {
+                    MEDIA.mikrofon = await navigator.mediaDevices.getUserMedia({
+                        audio: { echoCancellation: true, noiseSuppression: true }
+                    });
+                } catch (e) {
+                    this.toast(this.opisBleduMedia(e, 'mikrofonu'), 'error');
+                    return;
+                } finally {
+                    this.room.mikrofonCzeka = false;
+                }
+
+                const sciezka = MEDIA.mikrofon.getAudioTracks()[0];
+                MEDIA.local.addTrack(sciezka);
+                this.podmienSciezke('audio', sciezka);
+                this.sledzGlos(this.room.peerId, MEDIA.local);
+
+                this.room.mic = true;
+                this.room.ostrzezenie = '';
+                this.odswiezSwojKafelek();
+            },
+
+            przelaczKamere() {
+                return this.room.cam ? this.wylaczKamere() : this.wlaczKamere();
+            },
+
+            /**
+             * Kamerę bierzemy dopiero tutaj — przy wejściu do pokoju panel
+             * jej nie dotyka. Nieudana próba nie psuje trwającej rozmowy:
+             * dźwięk leci dalej, a użytkownik dostaje konkretną podpowiedź.
+             */
+            async wlaczKamere() {
+                if (this.room.kameraCzeka || MEDIA.kamera) return;
+                this.room.kameraCzeka = true;
+
+                try {
+                    MEDIA.kamera = await navigator.mediaDevices.getUserMedia({
+                        video: { width: { ideal: 1280 }, height: { ideal: 720 } }
+                    });
+                } catch (e) {
+                    this.toast(this.opisBleduMedia(e, 'kamery'), 'error');
+                    return;
+                } finally {
+                    this.room.kameraCzeka = false;
+                }
+
+                const sciezka = MEDIA.kamera.getVideoTracks()[0];
+                MEDIA.local.addTrack(sciezka);
+
+                /* Przy udostępnianym ekranie kamera czeka w kolejce —
+                   podmienimy tor dopiero po zakończeniu udostępniania. */
+                if (!this.room.sharing) this.podmienSciezke('video', sciezka);
+
+                /* Wyciągnięcie kabelka z kamery też ma zdjąć jej stan. */
+                sciezka.onended = () => { if (this.room.cam) this.wylaczKamere(); };
+
+                this.room.cam = true;
+                this.room.strumienTik++;
+                this.odswiezSwojKafelek();
+            },
+
+            /** Wyłączenie zwalnia kamerę dla innych programów, nie tylko gasi obraz. */
+            wylaczKamere() {
+                if (!this.room.sharing) this.podmienSciezke('video', null);
+
+                if (MEDIA.kamera) {
+                    MEDIA.kamera.getTracks().forEach(t => {
+                        MEDIA.local.removeTrack(t);
+                        t.stop();
+                    });
+                    MEDIA.kamera = null;
+                }
+
+                this.room.cam = false;
+                this.room.strumienTik++;
+                this.odswiezSwojKafelek();
+            },
+
+            async przelaczEkran() {
+                if (this.room.sharing) { this.zakonczUdostepnianie(); return; }
+
+                try {
+                    MEDIA.ekran = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+                } catch (e) {
+                    /* Anulowanie okna wyboru to nie błąd — nie zawracamy głowy. */
+                    if (e.name !== 'NotAllowedError') {
+                        this.toast('Nie udało się udostępnić ekranu: ' + e.message, 'error');
+                    }
+                    return;
+                }
+
+                const sciezka = MEDIA.ekran.getVideoTracks()[0];
+                this.podmienSciezke('video', sciezka);
+                this.room.sharing = true;
+                this.room.strumienTik++;
+                this.odswiezSwojKafelek();
+
+                /* Zatrzymanie z paska przeglądarki też musi zdjąć udostępnianie. */
+                sciezka.onended = () => this.zakonczUdostepnianie();
+            },
+
+            zakonczUdostepnianie() {
+                if (MEDIA.ekran) {
+                    MEDIA.ekran.getTracks().forEach(t => t.stop());
+                    MEDIA.ekran = null;
+                }
+
+                /* Wracamy do kamery, jeśli była włączona; jeśli nie —
+                   przestajemy nadawać obraz i zostają same inicjały. */
+                const kamera = MEDIA.kamera ? MEDIA.kamera.getVideoTracks()[0] : null;
+                this.podmienSciezke('video', kamera || null);
+
+                this.room.sharing = false;
+                this.room.strumienTik++;
+                this.odswiezSwojKafelek();
+            },
+
+            /**
+             * Podmienia to, co wysyłamy na danym torze, u wszystkich rozmówców.
+             * Tor istnieje od chwili zestawienia połączenia, więc ani włączenie
+             * kamery, ani udostępnienie ekranu nie wymaga nowych negocjacji.
+             * `null` znaczy „przestań nadawać na tym torze”.
+             */
+            podmienSciezke(rodzaj, sciezka) {
+                for (const pc of MEDIA.pc.values()) {
+                    for (const tor of pc.getTransceivers()) {
+                        /* Gdy nic nie nadajemy, rodzaj toru zdradza dopiero
+                           ścieżka odbiorcza — ta powstaje razem z torem. */
+                        const czego = (tor.sender.track && tor.sender.track.kind)
+                            || (tor.receiver.track && tor.receiver.track.kind);
+
+                        if (czego === rodzaj) {
+                            tor.sender.replaceTrack(sciezka).catch(() => {});
+                            break;
+                        }
+                    }
+                }
+            },
+
+            /* --------------------------- wyjście -------------------------- */
+
+            async opuscPokoj() {
+                const peerId = this.room.peerId;
+
+                clearTimeout(MEDIA.petla);
+                clearInterval(MEDIA.zegar);
+
+                if (this.notatka.stan === 'dirty') {
+                    clearTimeout(this.notatka.timer);
+                    await this.zapiszNotatke();
+                }
+
+                for (const id of Array.from(MEDIA.pc.keys())) this.rozlacz(id);
+
+                this.zakonczUdostepnianie();
+
+                for (const strumien of [MEDIA.kamera, MEDIA.mikrofon, MEDIA.local]) {
+                    if (strumien) strumien.getTracks().forEach(t => t.stop());
+                }
+                MEDIA.kamera = null;
+                MEDIA.mikrofon = null;
+                MEDIA.local = null;
+                this.zamknijAnalizator(this.room.peerId);
+
+                this.room.open = false;
+                this.room.peers = [];
+                this.room.czas = '';
+                this.room.start = 0;
+                this.notatka.meetingId = null;
+
+                if (peerId) {
+                    try {
+                        this.apply(await this.api('meeting.leave', { peer_id: peerId }, 'POST'));
+                    } catch (e) { /* serwer i tak posprząta po czasie */ }
+                }
+                await this.odswiezSpotkania();
+            },
+
+            /* ---------------------- podpięcie obrazu ---------------------- */
+
+            podepnijWideo(el, peerId) {
+                const swoj = peerId === this.room.peerId;
+
+                /* Własnego głosu nie odtwarzamy — natychmiastowe sprzężenie. */
+                el.muted = swoj;
+
+                const strumien = swoj ? (MEDIA.ekran || MEDIA.kamera) : MEDIA.zdalne.get(peerId);
+                if (el.srcObject !== strumien) {
+                    el.srcObject = strumien || null;
+                    if (strumien) el.play().catch(() => {});
+                }
+            },
+
+            stanPolaczeniaTekst(stan) {
+                const opisy = {
+                    new: 'łączenie…', connecting: 'łączenie…', connected: 'połączono',
+                    disconnected: 'przerwa w łączu', failed: 'brak połączenia', closed: 'rozłączono'
+                };
+                return opisy[stan] || 'łączenie…';
+            },
+
+            /* ------------------- kto teraz mówi --------------------------- */
+
+            /**
+             * Prosty wskaźnik mówienia: mierzymy głośność strumienia i po
+             * przekroczeniu progu podświetlamy kafelek. Przy wyłączonych
+             * kamerach to jedyna informacja, kto właśnie zabiera głos.
+             */
+            sledzGlos(peerId, strumien) {
+                if (!strumien.getAudioTracks().length) return;
+                if (!window.AudioContext && !window.webkitAudioContext) return;
+
+                this.zamknijAnalizator(peerId);
+                try {
+                    const Kontekst = window.AudioContext || window.webkitAudioContext;
+                    const kontekst = new Kontekst();
+                    const zrodlo = kontekst.createMediaStreamSource(strumien);
+                    const analizator = kontekst.createAnalyser();
+                    analizator.fftSize = 512;
+                    zrodlo.connect(analizator);
+
+                    const dane = new Uint8Array(analizator.frequencyBinCount);
+                    const timer = setInterval(() => {
+                        if (!this.room.open) return;
+                        analizator.getByteFrequencyData(dane);
+
+                        let suma = 0;
+                        for (let i = 0; i < dane.length; i++) suma += dane[i];
+                        const glosno = (suma / dane.length) > 12;
+
+                        if (MEDIA.glosy.get(peerId) !== glosno) {
+                            MEDIA.glosy.set(peerId, glosno);
+                            const wpis = this.room.peers.find(p => p.peer_id === peerId);
+                            if (wpis) wpis.mowi = glosno;
+                        }
+                    }, 250);
+
+                    MEDIA.analizatory.set(peerId, { kontekst, timer });
+                } catch (e) { /* wskaźnik mówienia to dodatek, nie warunek rozmowy */ }
+            },
+
+            zamknijAnalizator(peerId) {
+                const wpis = MEDIA.analizatory.get(peerId);
+                if (!wpis) return;
+                clearInterval(wpis.timer);
+                try { wpis.kontekst.close(); } catch (e) {}
+                MEDIA.analizatory.delete(peerId);
+            },
+
             /* --------------------- terminy wykonania ---------------------- */
+
+            /**
+             * Data jako RRRR-MM-DD w czasie lokalnym. Świadomie nie używamy
+             * toISOString(): ono przelicza na UTC i w naszej strefie potrafi
+             * cofnąć datę o jeden dzień.
+             */
+            isoZDaty(d) {
+                return d.getFullYear() + '-'
+                    + String(d.getMonth() + 1).padStart(2, '0') + '-'
+                    + String(d.getDate()).padStart(2, '0');
+            },
 
             /** Data w formacie RRRR-MM-DD, przesunięta o podaną liczbę dni. */
             dataZa(dni) {
                 const d = new Date();
                 d.setHours(12, 0, 0, 0);
                 d.setDate(d.getDate() + dni);
-                return d.getFullYear() + '-'
-                    + String(d.getMonth() + 1).padStart(2, '0') + '-'
-                    + String(d.getDate()).padStart(2, '0');
+                return this.isoZDaty(d);
             },
 
             /** Ile dni dzieli nas od terminu: 0 = dziś, ujemne = po terminie. */
@@ -1997,6 +4283,16 @@ function render_setup_error(string $message): void
 
             odmianaDni(n) {
                 return n === 1 ? '1 dzień' : n + ' dni';
+            },
+
+            /** „1 zadanie”, „3 zadania”, „5 zadań”, „22 zadania”, „12 zadań”. */
+            odmianaZadan(n) {
+                if (n === 1) return '1 zadanie';
+                const setki = n % 100;
+                const jednosci = n % 10;
+                return (jednosci >= 2 && jednosci <= 4 && (setki < 12 || setki > 14))
+                    ? n + ' zadania'
+                    : n + ' zadań';
             },
 
             /** Kolory plakietki terminu: czerwony po terminie, bursztyn na dziś. */
@@ -2996,7 +5292,17 @@ function render_setup_error(string $message): void
             },
 
             closeTop() {
+                /* W pokoju Escape zamyka panele boczne, ale nigdy nie kończy
+                   rozmowy — wyjście musi być świadomym kliknięciem. */
+                if (this.room.open) {
+                    if (this.notatka.konflikt) return;
+                    if (this.room.notatkiOpen) { this.room.notatkiOpen = false; return; }
+                    if (this.room.listaOpen)   { this.room.listaOpen = false; return; }
+                    return;
+                }
                 if (this.ask.open) { this.ask.open = false; return; }
+                if (this.notatka.open) { this.zamknijNotatkeSpotkania(); return; }
+                if (this.form.open) { this.form.open = false; return; }
                 if (this.docx.open) { this.docx.open = false; return; }
                 if (this.filePickerOpen) { this.filePickerOpen = false; return; }
                 if (this.task.open) { this.task.open = false; return; }

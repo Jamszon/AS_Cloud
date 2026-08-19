@@ -421,6 +421,122 @@ header('Content-Type: text/html; charset=utf-8');
         która działa — a w ostateczności dzieli plik na drobne fragmenty.
     </p>
 
+    <h3>Wideorozmowy — czy pokój ruszy na tym hostingu</h3>
+    <table id="wideo">
+        <?php
+        $https = (!empty($_SERVER['HTTPS']) && strtolower((string)$_SERVER['HTTPS']) !== 'off');
+
+        $polityka = '';
+        foreach (headers_list() as $naglowek) {
+            if (stripos($naglowek, 'Permissions-Policy:') === 0) {
+                $polityka = trim(substr($naglowek, strlen('Permissions-Policy:')));
+            }
+        }
+
+        /* Puste nawiasy przy camera albo microphone blokują sprzęt również
+           własnej stronie. To najczęstsza przyczyna sytuacji „zezwoliłem
+           w przeglądarce, a kamera i tak nie rusza”. */
+        $bezSpacji = str_replace(' ', '', $polityka);
+        $politykaBlokuje = $polityka !== ''
+            && (strpos($bezSpacji, 'camera=()') !== false || strpos($bezSpacji, 'microphone=()') !== false);
+
+        /* Bazę otwieramy wprost, bez dołączania db.php — ten plik ma działać
+           także wtedy, gdy sam panel się nie uruchamia. */
+        $tabele = -1;
+        $plikBazy = __DIR__ . '/data/panel.sqlite';
+        if (file_exists($plikBazy) && in_array('sqlite', PDO::getAvailableDrivers(), true)) {
+            try {
+                $pdoDiag = new PDO('sqlite:' . $plikBazy, null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+                $tabele = (int)$pdoDiag->query(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type='table'
+                      AND name IN ('meetings','meeting_participants','meeting_notes','meeting_presence','meeting_signals')"
+                )->fetchColumn();
+            } catch (Throwable $e) {
+                $tabele = -1;
+            }
+        }
+        ?>
+
+        <?= wiersz('Połączenie po HTTPS', $https,
+              $https ? 'tak' : 'nie',
+              $https ? '' : 'Warunek konieczny: bez HTTPS przeglądarka w ogóle nie udostępni kamery ani mikrofonu, niezależnie od ustawień panelu. Włącz darmowy certyfikat (Let&rsquo;s Encrypt) w panelu hostingu.') ?>
+
+        <?= wiersz('Nagłówek Permissions-Policy', !$politykaBlokuje,
+              $polityka !== '' ? htmlspecialchars($polityka, ENT_QUOTES) : 'nie jest wysyłany (to też w porządku)',
+              $politykaBlokuje
+                  ? 'Ten nagłówek blokuje kamerę lub mikrofon dla całej witryny. W pliku .htaccess zamień puste nawiasy na camera=(self), microphone=(self), display-capture=(self).'
+                  : '') ?>
+
+        <?= wiersz('Tabele spotkań w bazie', $tabele === 5,
+              $tabele >= 0 ? $tabele . ' z 5' : 'nie udało się sprawdzić',
+              $tabele === 5
+                  ? ''
+                  : ($tabele >= 0
+                      ? 'Otwórz panel w przeglądarce — brakujące tabele dokłada migracja przy pierwszym wejściu.'
+                      : 'Baza jeszcze nie istnieje albo nie da się jej odczytać. Zaloguj się raz do panelu i wróć tutaj.')) ?>
+
+        <tr id="wideo-js"><td class="i">…</td><td class="n">Obsługa w tej przeglądarce</td><td class="w">sprawdzam…</td></tr>
+        <tr id="wideo-stun"><td class="i">…</td><td class="n">Test serwera STUN</td><td class="w">to potrwa kilka sekund…</td></tr>
+    </table>
+    <p style="margin:10px 2px 0;font-size:13px;color:#64748b">
+        Obraz i dźwięk idą bezpośrednio między przeglądarkami — serwer pośredniczy
+        wyłącznie w nawiązaniu połączenia, więc transmisja nie obciąża hostingu.
+    </p>
+
+    <script>
+    /* Dwie rzeczy, których serwer o sobie nie powie: co potrafi przeglądarka
+       osoby patrzącej na tę stronę i czy z tej sieci da się w ogóle wyjść
+       do serwera STUN. */
+    (function () {
+        var wiersz = document.getElementById('wideo-js');
+        var braki = [];
+        var uwagi = '';
+
+        if (!window.isSecureContext) braki.push('brak bezpiecznego kontekstu (HTTPS)');
+        if (!window.RTCPeerConnection) braki.push('brak RTCPeerConnection');
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) braki.push('brak dostępu do kamery i mikrofonu');
+        if (navigator.mediaDevices && !navigator.mediaDevices.getDisplayMedia) {
+            uwagi = 'Udostępnianie ekranu jest niedostępne — na telefonach to normalne, reszta rozmowy działa mimo to.';
+        }
+
+        var ok = braki.length === 0;
+        wiersz.className = ok ? 'ok' : 'zle';
+        wiersz.querySelector('.i').textContent = ok ? '✔' : '✖';
+        wiersz.querySelector('.w').innerHTML =
+            (ok ? 'komplet obsługiwany' : braki.join(', ')) + (uwagi ? '<span class="u">' + uwagi + '</span>' : '');
+
+        /* Test STUN: prosimy przeglądarkę o kandydatów ICE i sprawdzamy, czy
+           wśród nich jest „srflx”, czyli adres widziany z internetu. Jeśli są
+           wyłącznie kandydaci „host”, sieć nie wypuszcza ruchu do STUN-a
+           i rozmowa poza tę sieć nie wyjdzie. */
+        var wierszStun = document.getElementById('wideo-stun');
+        if (!window.RTCPeerConnection) {
+            wierszStun.className = 'zle';
+            wierszStun.querySelector('.i').textContent = '✖';
+            wierszStun.querySelector('.w').textContent = 'nie ma czym przetestować';
+            return;
+        }
+
+        var typy = {};
+        var pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+        pc.createDataChannel('test');
+        pc.onicecandidate = function (e) { if (e.candidate) typy[e.candidate.type] = true; };
+        pc.createOffer().then(function (o) { return pc.setLocalDescription(o); }).catch(function () {});
+
+        setTimeout(function () {
+            try { pc.close(); } catch (e) {}
+
+            var maPubliczny = typy.srflx || typy.relay;
+            wierszStun.className = maPubliczny ? 'ok' : 'zle';
+            wierszStun.querySelector('.i').textContent = maPubliczny ? '✔' : '✖';
+            wierszStun.querySelector('.w').innerHTML = maPubliczny
+                ? 'adres publiczny rozpoznany (' + Object.keys(typy).join(', ') + ')'
+                : 'brak adresu publicznego (' + (Object.keys(typy).join(', ') || 'zero kandydatów') + ')'
+                  + '<span class="u">Ta sieć nie wypuszcza ruchu do serwera STUN. Rozmowa zadziała najwyżej wewnątrz sieci lokalnej — potrzebny będzie serwer TURN wpisany w stałej TURN_SERVERS w db.php.</span>';
+        }, 5000);
+    })();
+    </script>
+
     <h3>Limity wysyłania plików</h3>
     <table>
         <?= wiersz('Efektywny limit co najmniej 15 MB', $limitUpload >= 15728640,

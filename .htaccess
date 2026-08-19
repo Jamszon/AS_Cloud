@@ -61,7 +61,12 @@ Options -Indexes
     Header always set X-Content-Type-Options "nosniff"
     Header always set X-Frame-Options "SAMEORIGIN"
     Header always set Referrer-Policy "same-origin"
-    Header always set Permissions-Policy "geolocation=(), microphone=(), camera=()"
+    # Kamera, mikrofon i udostepnianie ekranu tylko dla tej domeny (self).
+    # UWAGA: puste nawiasy, np. camera=(), blokuja kamere calkowicie -- takze
+    # dla wlasnej strony. Modul wideorozmow przestaje wtedy dzialac, a
+    # przegladarka nie pyta nawet o zgode. Geolokalizacji panel nie uzywa,
+    # wiec ta zostaje wylaczona.
+    Header always set Permissions-Policy "geolocation=(), microphone=(self), camera=(self), display-capture=(self)"
 </IfModule>
 
 # ---------------------------------------------------------------

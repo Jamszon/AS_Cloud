@@ -1,7 +1,8 @@
 # Panel zespołu — instrukcja wdrożenia
 
 Panel zarządzania zadaniami dla czteroosobowego zespołu: foldery projektowe,
-tablica kanban, wspólna notatka Markdown, załączniki i dziennik zmian.
+tablica kanban, terminy z kalendarzem, wideorozmowy z notatkami, wspólna
+notatka Markdown, załączniki i dziennik zmian.
 
 Aplikacja jest napisana w czystym PHP z bazą SQLite. **Nie wymaga Dockera,
 Node.js, Composera ani linii poleceń** — wystarczy skopiować pliki przez FTP.
@@ -17,9 +18,20 @@ Node.js, Composera ani linii poleceń** — wystarczy skopiować pliki przez FTP
 | Serwer WWW | Apache lub LiteSpeed z obsługą `.htaccess` |
 | Miejsce na dysku | ~1 MB na aplikację + tyle, ile zajmą załączniki |
 | Przeglądarka | Dowolna aktualna (panel pobiera Tailwind CSS i Alpine.js z CDN, więc potrzebny jest internet po stronie użytkownika) |
+| HTTPS | **Wymagany do wideorozmów.** Reszta panelu działa też po HTTP |
 
 Praktycznie każdy polski hosting współdzielony (home.pl, OVH, cyber_Folks,
 nazwa.pl, Zenbox, LH.pl, seohost) spełnia te warunki bez żadnych zmian.
+
+> **Wideorozmowy wymagają HTTPS.** To ograniczenie przeglądarek, nie panelu:
+> bez bezpiecznego połączenia Chrome i Firefox nie udostępnią kamery ani
+> mikrofonu żadnej stronie. Certyfikat Let's Encrypt jest na wszystkich
+> wymienionych hostingach darmowy i włącza się jednym kliknięciem w panelu
+> administracyjnym. Dopóki go nie ma, panel pokazuje o tym ostrzeżenie
+> w zakładce *Spotkania* i nie pozwala wejść do pokoju.
+>
+> Moduł wideo **nie wymaga** natomiast Node.js, WebSocketów ani konta
+> w żadnej usłudze zewnętrznej.
 
 ---
 
@@ -201,10 +213,95 @@ do Ciebie ze **wszystkich folderów** i grupuje je według pilności: *Po termin
 Licznik przy nazwie robi się czerwony, gdy cokolwiek jest po terminie. Kliknięcie
 zadania przenosi do jego folderu i otwiera okno szczegółów.
 
+**Kalendarz** — druga pozycja w bocznym panelu. Pokazuje miesiąc w układzie
+siedmiu kolumn (poniedziałek – niedziela) i rozkłada na nim **terminy zadań ze
+wszystkich folderów naraz**. Zadania bez terminu tu nie trafiają.
+
+W kratce mieszczą się trzy paski zadań; przy większej liczbie w rogu pojawia się
+`+2`, a **kliknięcie w dzień rozwija pod kalendarzem pełną listę** tego dnia.
+Kliknięcie samego paska otwiera zadanie w jego folderze — z opisem, załącznikami
+i komentarzami. Kwadracik przy zadaniu na liście dnia od razu oznacza je jako
+zrobione.
+
+Kolor paska mówi to samo, co plakietka na tablicy: **czerwony** po terminie,
+**bursztynowy** na dziś, **niebieski** dalej w przyszłości, **szary przekreślony**
+dla zrobionych. Kropka z lewej strony paska ma kolor pierwszej osoby
+odpowiedzialnej. Dzisiejszy dzień jest zaznaczony granatowym kółkiem.
+
+Nad kalendarzem: strzałki przewijają miesiące, *Dziś* wraca do bieżącego,
+a dwa przełączniki zawężają widok — *Tylko moje* zostawia zadania przypisane do
+Ciebie, *Ukryj zrobione* chowa zamknięte. Podobnie jak filtry tablicy, działają
+wyłącznie w Twojej przeglądarce.
+
+Kalendarz pokazuje też kilka dni z sąsiednich miesięcy, żeby domknąć pierwszy
+i ostatni tydzień — dzięki temu widać, czy zaraz po granicy miesiąca nie czeka
+coś pilnego. Na telefonie siedem kolumn jest nieczytelne, więc panel zastępuje
+siatkę **listą dni**, w których coś wypada.
+
 **Komentarze** — okno zadania ma osobną sekcję dyskusji, niezależną od opisu.
 Każdy wpis ma autora i czas, `Ctrl+Enter` wysyła. Swój komentarz można usunąć,
 cudzego nie — chodzi o to, żeby nikt nie zmieniał cudzej wypowiedzi. Karta na
 tablicy pokazuje liczbę komentarzy ikoną dymka.
+
+**Spotkania (wideorozmowy)** — trzecia pozycja w bocznym panelu.
+Rozmowa startuje **głosowo**, z kamerą jako opcją do włączenia w pokoju. Przycisk
+*Umów spotkanie* otwiera formularz: temat, data, godzina, czas trwania,
+agenda, uczestnicy z zespołu, adresy gości i opcjonalne powiązanie z folderem.
+Skróty *Za chwilę*, *Za godzinę* i *Jutro 9:00* wpisują termin jednym
+kliknięciem. Każde spotkanie dostaje własny, losowy adres pokoju
+(np. `krz-fmbq-wtd`) — kopiujesz go przyciskiem *Link*.
+
+Lista dzieli się na trzy sekcje: **W trakcie**, **Nadchodzące**
+i **Zakończone** (te ostatnie pod przyciskiem *Archiwum*). Status liczy się
+na bieżąco z zegara i z tego, czy ktoś siedzi w pokoju — spotkanie sprzed
+miesiąca, na które nikt nie przyszedł, samo trafia do archiwum.
+
+Pokój otwiera się **15 minut przed startem** i zamyka dwie godziny po
+planowanym końcu. Wcześniej przycisk *Dołącz teraz* jest nieaktywny i pisze,
+dlaczego. Spotkaniem zarządza osoba, która je umówiła — tylko ona zmienia
+szczegóły, odwołuje i usuwa. Dołączyć i pisać notatkę może każdy z zespołu.
+
+**Kto może wejść** — wyłącznie osoby zalogowane w panelu. Adresy e-mail
+z formularza to lista zaproszonych, a nie przepustka: panel nie wysyła
+poczty, więc link przekazujesz sam. Sam link też nie omija logowania.
+
+**W pokoju rozmawiacie domyślnie samym głosem.** Kafelki pokazują inicjały,
+a pierścień wokół nich zapala się na zielono, gdy ktoś mówi. To celowe:
+kamera bywa zajęta przez inny program (Teams, Zoom, Skype, OBS, aparat
+systemowy), a w rozmowie roboczej i tak włącza ją mało kto.
+
+**Kamera jest opcją, nie warunkiem.** Panel prosi o nią dopiero po kliknięciu
+przycisku kamery — do tej chwili urządzenie zostaje wolne dla innych
+programów. Wyłączenie kamery nie gasi tylko obrazu: **zwalnia sprzęt**,
+więc nie blokujesz go koledze ani sobie w innym oknie. Włączona kamera jest
+wyróżniona kolorem, wyłączona wygląda zwyczajnie — bo to normalny stan,
+a nie awaria.
+
+Jeśli kamera nie chce się włączyć, panel mówi dlaczego. Przy komunikacie
+o zajętym urządzeniu wystarczy zamknąć program, który je trzyma, i kliknąć
+przycisk jeszcze raz — rozmowa nie jest przerywana, dźwięk leci dalej.
+Tak samo działa mikrofon: gdy nie udało się go dostać przy wejściu, kliknięcie
+ikony mikrofonu próbuje ponownie.
+
+Pod kafelkami pasek sterowania: mikrofon, kamera, udostępnianie ekranu,
+notatka i czerwony przycisk wyjścia. Ekran można udostępnić **bez włączania
+kamery**. Ikona ludzików pokazuje listę obecnych ze stanem połączenia każdej
+osoby. Klawisz `Esc` zamyka panele boczne, ale **nigdy nie kończy rozmowy** —
+wyjście wymaga świadomego kliknięcia.
+
+Ostatnia osoba wychodząca z pokoju zamyka spotkanie i przenosi je do archiwum.
+
+**Notatki ze spotkania** — panel po prawej stronie pokoju (na telefonie
+wysuwany od dołu). Markdown jak w notatce folderu, z **autozapisem**: panel
+zapisuje po 1,2 sekundy ciszy i pokazuje stan — *niezapisane zmiany*,
+*zapisywanie*, *zapisano*. Notatka jest wspólna: kto tylko patrzy, temu
+tekst dopisuje się na żywo.
+
+Gdy dwie osoby piszą naraz, panel **nie nadpisuje po cichu**. Każdy zapis
+niesie numer wersji; jeśli w międzyczasie zapisał ktoś inny, pojawia się
+pasek z wyborem: *Wczytaj wersję z serwera* albo *Zachowaj moją*.
+Notatkę otwierasz i edytujesz również po spotkaniu — przycisk *Notatka*
+na karcie w archiwum.
 
 **Notatka** — wspólne pole tekstowe z obsługą Markdown (`#` nagłówki,
 `- ` listy, `**pogrubienie**`, `[link](https://…)`, ``` bloki kodu ```).
@@ -369,9 +466,17 @@ logowanie i dziennik aktywności.
 | `folder.reorder` | POST | Nowa kolejność folderów po przeciągnięciu |
 | `task.create` / `task.update` / `task.delete` | POST | Operacje na zadaniach (`due_date` w formacie `RRRR-MM-DD` albo `null`) |
 | `task.mine` | GET | Otwarte zadania przypisane do zalogowanej osoby, ze wszystkich folderów |
+| `task.calendar` | GET | Zadania z terminem w zakresie `&from=`…`&to=` (`RRRR-MM-DD`), ze wszystkich folderów |
 | `comment.list` | GET | Komentarze pod zadaniem |
 | `comment.add` / `comment.delete` | POST | Dyskusja pod zadaniem (skasować może tylko autor) |
 | `note.save` | POST | Zapis notatki folderu |
+| `meeting.list` | GET | Wszystkie spotkania zespołu ze stanem i uczestnikami |
+| `meeting.open` | GET | Jedno spotkanie z notatką (`&id=` albo `&room=`) |
+| `meeting.create` / `meeting.update` / `meeting.delete` | POST | Zarządzanie spotkaniem (tylko osoba, która je umówiła) |
+| `meeting.join` / `meeting.leave` | POST | Wejście i wyjście z pokoju; zwraca konfigurację ICE i listę obecnych |
+| `meeting.note` | POST | Zapis notatki z numerem wersji (`force: true` nadpisuje mimo kolizji) |
+| `rtc.poll` | POST | Jedno odpytanie pokoju: obecność, stan mikrofonu i kamery, odbiór wiadomości sygnalizacyjnych |
+| `rtc.signal` | POST | Oferta, odpowiedź albo kandydat ICE dla wskazanego uczestnika |
 | `file.upload` / `file.delete` | POST | Załączniki (`task_id` podpina plik pod zadanie już przy wysyłce) |
 | `file.chunk` | POST | Fragment pliku przy wysyłce porcjami; `final: true` kończy i składa całość |
 | `file.assign` | POST | Podpina istniejący plik pod zadanie albo odpina (`task_id: null`) |
@@ -425,14 +530,85 @@ Która metoda działa na danym hostingu, sprawdza `diagnostyka.php` w sekcji
 „Transport wysyłki" — wysyła 4 kB każdą z trzech dróg i pokazuje, ile bajtów
 faktycznie dotarło.
 
+### Jak działa wideorozmowa
+
+Obraz i dźwięk idą **bezpośrednio między przeglądarkami** (WebRTC, połączenie
+każdy z każdym). Serwer pośredniczy wyłącznie w nawiązaniu połączenia i po
+jego zestawieniu nie przenosi już ani jednego bajtu transmisji — przy czterech
+osobach to trzy strumienie wychodzące na osobę i zero obciążenia hostingu.
+
+Hosting współdzielony nie daje WebSocketów ani procesów działających w tle,
+więc sygnalizacja idzie tą samą drogą co reszta panelu: wiadomości lądują
+w tabeli `meeting_signals`, a przeglądarki odbierają je, odpytując `api.php`.
+Jedno żądanie `rtc.poll` robi trzy rzeczy naraz — podtrzymuje obecność,
+przynosi listę osób w pokoju i opróżnia skrzynkę wiadomości. Odpytywanie
+przyspiesza do sekundy, gdy coś się jeszcze zestawia, i zwalnia do trzech,
+gdy wszyscy są połączeni.
+
+Ofertę połączenia składa zawsze ta strona, której identyfikator jest
+mniejszy alfabetycznie. Bez takiej umowy obie strony wysłałyby ofertę naraz
+i połączenie rozsypałoby się na kolizji.
+
+Ta sama strona ustala **układ torów**: najpierw dźwięk, potem obraz. Oba
+powstają od razu przy zestawianiu połączenia, nawet gdy kamera jest wyłączona,
+a odpowiadający zgłasza na nich gotowość do nadawania, zanim złoży odpowiedź.
+Dzięki temu włączenie kamery w trakcie rozmowy jest samą podmianą ścieżki
+(`replaceTrack`) i nie wymaga negocjacji od nowa — przez sygnalizację opartą
+o odpytywanie byłaby ona wolna i zawodna. Gdyby tory zakładały obie strony
+niezależnie, każda nadawałaby na torze, którego druga w ogóle nie czyta.
+
+Obiekty WebRTC (`MediaStream`, `RTCPeerConnection`, `AudioContext`) żyją
+w `index.php` poza stanem Alpine, w stałej `MEDIA`. Alpine opakowuje dane
+w `Proxy`, a przypisanie opakowanego strumienia do elementu `<video>` po
+prostu nie działa. Interfejs dowiaduje się o zmianach przez licznik
+`room.strumienTik`.
+
+### Gdy rozmowa nie chce się zestawić
+
+Panel korzysta z publicznych serwerów **STUN** (stała `STUN_SERVERS`
+w `db.php`) — mówią przeglądarce, jaki ma publiczny adres. Nie przechodzi
+przez nie żaden obraz ani dźwięk.
+
+W części sieci — głównie firmowych i komórkowych — NAT nie przepuszcza
+połączenia bezpośredniego i wtedy potrzebny jest **przekaźnik TURN**. Panel
+nie ma go domyślnie, bo TURN wymaga własnego serwera albo płatnej usługi.
+Gdy po dwudziestu sekundach któreś połączenie nie wstanie, pokój pisze
+o tym wprost.
+
+Przekaźnik dopisujesz w `db.php`:
+
+```php
+const TURN_SERVERS = [
+    ['urls' => 'turn:adres.serwera:3478', 'username' => 'login', 'credential' => 'haslo'],
+];
+```
+
+Czy problem leży po stronie sieci, sprawdzisz w `diagnostyka.php` — sekcja
+*Wideorozmowy* testuje realny dostęp do serwera STUN i pokazuje, jakie
+adresy udało się przeglądarce ustalić.
+
 ### Tabele bazy
 
 `users`, `folders`, `tasks`, `task_assignees`, `task_comments`, `notes`,
-`files`, `activity`, `login_attempts`. Przypisania osób do zadań leżą
+`files`, `activity`, `login_attempts`, `meetings`, `meeting_participants`,
+`meeting_notes`, `meeting_presence`, `meeting_signals`. Przypisania osób do zadań leżą
 w `task_assignees` (jedno zadanie ↔ wiele osób), `task_comments` trzyma
 dyskusję pod zadaniem, a `files.task_id` wskazuje zadanie, pod które podpięto
 załącznik — wartość `NULL` oznacza plik należący do całego folderu.
 Termin wykonania to `tasks.due_date` w formacie `RRRR-MM-DD` (`NULL` = brak).
+
+Spotkania trzyma `meetings` (`room_id` to publiczny adres pokoju), listę
+zaproszonych `meeting_participants` — z `user_id` **albo** `email`, przy czym
+unikalności pilnują dwa indeksy częściowe, bo SQLite dopuszcza powtórzone
+`NULL`-e w kluczu złożonym. `meeting_notes` przechowuje notatkę wraz
+z numerem `revision`, na którym opiera się wykrywanie równoległej edycji.
+`meeting_presence` i `meeting_signals` to dane ulotne: obecność wygasa po
+25 sekundach bez sygnału życia, a wiadomości sygnalizacyjne po minucie —
+jedne i drugie sprzątają się same przy każdym odpytaniu pokoju.
+Kalendarz nie ma własnej tabeli — czyta `tasks.due_date` zakresem dat, a że
+format jest sortowalny leksykograficznie, porównanie tekstowe działa tu jak
+porównanie dat. Zadania bez terminu odpadają same: `NULL` nie przechodzi
+porównania, a pusty tekst jest mniejszy niż jakakolwiek data.
 Każdy wpis w `folders`, `tasks`, `notes` i `files` niesie informację o autorze
 (`created_by` / `uploaded_by`) i ostatniej zmianie (`updated_by`, `updated_at`),
 dzięki czemu widać, kto co zrobił.

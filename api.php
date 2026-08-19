@@ -95,6 +95,11 @@ function route(string $action): array
         'task.create', 'task.update', 'task.delete',
         'comment.add', 'comment.delete',
         'note.save', 'file.upload', 'file.chunk', 'file.delete', 'file.assign',
+        'meeting.create', 'meeting.update', 'meeting.delete',
+        'meeting.join', 'meeting.leave', 'meeting.note',
+        /* Odpytanie pokoju też zmienia dane: odświeża obecność i odbiera
+           wiadomości ze skrzynki, więc idzie POST-em jak reszta zapisów. */
+        'rtc.poll', 'rtc.signal',
     ];
     if (in_array($action, $writes, true)) {
         if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') {
@@ -121,12 +126,26 @@ function route(string $action): array
         case 'task.update':   return action_task_update($me);
         case 'task.delete':   return action_task_delete($me);
         case 'task.mine':     return action_task_mine($me);
+        case 'task.calendar': return action_task_calendar();
 
         case 'comment.list':   return action_comment_list();
         case 'comment.add':    return action_comment_add($me);
         case 'comment.delete': return action_comment_delete($me);
 
         case 'note.save':     return action_note_save($me);
+
+        case 'meeting.list':   return action_meeting_list();
+        case 'meeting.open':   return action_meeting_open();
+        case 'meeting.create': return action_meeting_create($me);
+        case 'meeting.update': return action_meeting_update($me);
+        case 'meeting.delete': return action_meeting_delete($me);
+        case 'meeting.join':   return action_meeting_join($me);
+        case 'meeting.leave':  return action_meeting_leave($me);
+        case 'meeting.note':   return action_meeting_note_save($me);
+
+        /* Sygnalizacja WebRTC — obraz i dźwięk idą już poza serwerem. */
+        case 'rtc.poll':       return action_rtc_poll($me);
+        case 'rtc.signal':     return action_rtc_signal($me);
 
         case 'file.upload':   return action_file_upload($me);
         case 'file.chunk':    return action_file_chunk($me);
@@ -148,6 +167,7 @@ function action_bootstrap(array $me): array
         'me'       => $me,
         'users'    => all_users(),
         'folders'  => folders_with_counts(),
+        'meetings' => meetings_all(),
         'activity' => activity_feed(),
         'stamp'    => last_activity_id(),
         'csrf'     => csrf_token(),
@@ -478,6 +498,76 @@ function action_task_mine(array $me): array
     return ['ok' => true, 'tasks' => $out];
 }
 
+/**
+ * Zadania z terminem mieszczącym się w podanym zakresie dat — ze wszystkich
+ * folderów naraz. Zakres wyznacza siatka kalendarza w przeglądarce, więc
+ * obejmuje też kilka dni z sąsiednich miesięcy.
+ *
+ * Zrobione zadania zostają w wyniku: kalendarz pokazuje, co na kiedy było
+ * zaplanowane, a nie tylko to, co jeszcze zostało do zrobienia.
+ */
+function action_task_calendar(): array
+{
+    $od = clean_range_date($_GET['from'] ?? null);
+    $do = clean_range_date($_GET['to'] ?? null);
+    if ($od > $do) {
+        [$od, $do] = [$do, $od];
+    }
+
+    /* due_date trzymamy jako RRRR-MM-DD, więc porównanie tekstowe działa tu
+       tak samo jak porównanie dat. Zadania bez terminu odpadają same:
+       NULL nie przechodzi porównania, a pusty tekst jest mniejszy niż
+       jakakolwiek data. */
+    $stmt = db()->prepare(
+        'SELECT t.*, f.name AS folder_name,
+                cu.name AS created_by_name, cu.color AS created_by_color,
+                uu.name AS updated_by_name
+         FROM tasks t
+         JOIN folders f ON f.id = t.folder_id
+         LEFT JOIN users cu ON cu.id = t.created_by
+         LEFT JOIN users uu ON uu.id = t.updated_by
+         WHERE t.due_date >= ? AND t.due_date <= ?
+         ORDER BY t.due_date, f.position, t.id'
+    );
+    $stmt->execute([$od, $do]);
+    $rows = $stmt->fetchAll();
+
+    $ids = [];
+    foreach ($rows as $row) {
+        $ids[] = (int)$row['id'];
+    }
+
+    $osoby      = assignees_for_tasks($ids);
+    $zalaczniki = counts_for_tasks($ids, 'files', 'task_id');
+    $komentarze = counts_for_tasks($ids, 'task_comments', 'task_id');
+
+    $out = [];
+    foreach ($rows as $row) {
+        $out[] = map_task_row($row, $osoby, $zalaczniki, $komentarze) + [
+            'folder_name' => $row['folder_name'],
+        ];
+    }
+
+    return ['ok' => true, 'from' => $od, 'to' => $do, 'tasks' => $out];
+}
+
+/**
+ * Granica zakresu kalendarza. Osobno od clean_date(), bo tam pusta wartość
+ * znaczy „bez terminu”, a tutaj brak daty to po prostu złe wywołanie.
+ */
+function clean_range_date($value): string
+{
+    $value = is_string($value) ? trim($value) : '';
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $value)) {
+        throw new ApiError('Kalendarz wymaga zakresu dat w formacie RRRR-MM-DD.');
+    }
+    [$rok, $miesiac, $dzien] = array_map('intval', explode('-', $value));
+    if (!checkdate($miesiac, $dzien, $rok)) {
+        throw new ApiError('Podana data nie istnieje w kalendarzu.');
+    }
+    return $value;
+}
+
 /* ================================================================== *
  *  AKCJE — komentarze pod zadaniem
  * ================================================================== */
@@ -589,6 +679,762 @@ function action_note_save(array $me): array
     log_activity($me['id'], 'note.save', 'Aktualizacja notatki w folderze „' . $folder['name'] . '”', $folder['id'], $folder['name']);
 
     return ['ok' => true, 'note' => folder_note($folder['id']), 'activity' => activity_feed()];
+}
+
+/* ================================================================== *
+ *  AKCJE — spotkania wideo
+ * ================================================================== */
+
+/**
+ * Lista wszystkich spotkań zespołu, od najbliższego terminu.
+ * Panel jest wspólną przestrzenią czterech osób, więc spotkania widzą
+ * wszyscy — zarządza nimi ten, kto je umówił.
+ */
+function action_meeting_list(): array
+{
+    return ['ok' => true, 'meetings' => meetings_all()];
+}
+
+/** Jedno spotkanie wraz z notatką — do widoku szczegółów i do pokoju. */
+function action_meeting_open(): array
+{
+    $meeting = meeting_or_fail_by_any($_GET['id'] ?? null, $_GET['room'] ?? null);
+
+    return [
+        'ok'      => true,
+        'meeting' => map_meeting($meeting),
+        /* Rzutowanie jest konieczne: PDO SQLite w PHP 7.4 oddaje kolumny
+           jako łańcuchy, a strict_types nie wpuści ich do parametru int. */
+        'note'    => meeting_note((int)$meeting['id']),
+    ];
+}
+
+function action_meeting_create(array $me): array
+{
+    $dane = meeting_input_or_fail();
+
+    /* room_id trafia do linku, więc musi być nie do odgadnięcia. Kolizja
+       jest skrajnie mało prawdopodobna, ale unikalność pilnuje i tak baza. */
+    $roomId = new_room_id();
+    for ($proba = 0; $proba < 5; $proba++) {
+        $zajete = db()->prepare('SELECT 1 FROM meetings WHERE room_id = ?');
+        $zajete->execute([$roomId]);
+        if (!$zajete->fetchColumn()) {
+            break;
+        }
+        $roomId = new_room_id();
+    }
+
+    db()->prepare(
+        'INSERT INTO meetings
+            (room_id, title, description, folder_id, starts_at, duration_min,
+             status, created_by, created_at, updated_by, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, \'scheduled\', ?, ?, ?, ?)'
+    )->execute([
+        $roomId, $dane['title'], $dane['description'], $dane['folder_id'],
+        $dane['starts_at'], $dane['duration_min'], $me['id'], now(), $me['id'], now(),
+    ]);
+    $id = (int)db()->lastInsertId();
+
+    set_meeting_participants($id, $dane['user_ids'], $dane['emails'], (int)$me['id']);
+
+    $folder = $dane['folder_id'] ? folder_or_fail($dane['folder_id']) : null;
+    log_activity($me['id'], 'meeting.create', 'Umówił spotkanie „' . $dane['title'] . '”',
+        $folder ? (int)$folder['id'] : null, $folder ? $folder['name'] : null);
+
+    return ['ok' => true, 'meeting_id' => $id, 'meetings' => meetings_all(), 'activity' => activity_feed()];
+}
+
+function action_meeting_update(array $me): array
+{
+    $meeting = meeting_or_fail((int)(body()['id'] ?? 0));
+    meeting_owner_or_fail($meeting, $me);
+
+    $body = body();
+
+    /* Odwołanie i wznowienie idą osobną ścieżką: nie zmieniają terminu
+       ani uczestników, więc formularz nie musi ich odsyłać. */
+    if (array_key_exists('status', $body) && !array_key_exists('title', $body)) {
+        $nowy = (string)$body['status'];
+        if (!in_array($nowy, ['scheduled', 'ended', 'cancelled'], true)) {
+            throw new ApiError('Nieznany status spotkania.');
+        }
+
+        $pola = ['status' => $nowy, 'updated_by' => $me['id'], 'updated_at' => now()];
+        $pola['ended_at'] = $nowy === 'ended' ? now() : null;
+
+        db()->prepare('UPDATE meetings SET status = ?, ended_at = ?, updated_by = ?, updated_at = ? WHERE id = ?')
+            ->execute([$pola['status'], $pola['ended_at'], $pola['updated_by'], $pola['updated_at'], $meeting['id']]);
+
+        if ($nowy !== 'scheduled') {
+            db()->prepare('DELETE FROM meeting_presence WHERE meeting_id = ?')->execute([$meeting['id']]);
+        }
+
+        $slowo = $nowy === 'cancelled' ? 'Odwołał' : ($nowy === 'ended' ? 'Zakończył' : 'Przywrócił');
+        log_activity($me['id'], 'meeting.update', $slowo . ' spotkanie „' . $meeting['title'] . '”');
+
+        return ['ok' => true, 'meetings' => meetings_all(), 'activity' => activity_feed()];
+    }
+
+    $dane = meeting_input_or_fail();
+
+    db()->prepare(
+        'UPDATE meetings
+            SET title = ?, description = ?, folder_id = ?, starts_at = ?, duration_min = ?,
+                updated_by = ?, updated_at = ?
+          WHERE id = ?'
+    )->execute([
+        $dane['title'], $dane['description'], $dane['folder_id'], $dane['starts_at'],
+        $dane['duration_min'], $me['id'], now(), $meeting['id'],
+    ]);
+
+    set_meeting_participants((int)$meeting['id'], $dane['user_ids'], $dane['emails'], (int)$meeting['created_by']);
+
+    log_activity($me['id'], 'meeting.update', 'Zmienił spotkanie „' . $dane['title'] . '”');
+
+    return ['ok' => true, 'meetings' => meetings_all(), 'activity' => activity_feed()];
+}
+
+function action_meeting_delete(array $me): array
+{
+    $meeting = meeting_or_fail((int)(body()['id'] ?? 0));
+    meeting_owner_or_fail($meeting, $me);
+
+    /* Kaskady w schemacie sprzątają uczestników, notatkę, obecność i sygnały. */
+    db()->prepare('DELETE FROM meetings WHERE id = ?')->execute([$meeting['id']]);
+
+    log_activity($me['id'], 'meeting.delete', 'Usunął spotkanie „' . $meeting['title'] . '”');
+
+    return ['ok' => true, 'meetings' => meetings_all(), 'activity' => activity_feed()];
+}
+
+/**
+ * Wejście do pokoju. Zakłada wpis obecności dla tej karty przeglądarki
+ * i zwraca wszystko, czego potrzebuje warstwa WebRTC.
+ */
+function action_meeting_join(array $me): array
+{
+    $meeting = meeting_or_fail_by_any(body()['id'] ?? null, body()['room'] ?? null);
+    $peerId  = clean_peer_id(body()['peer_id'] ?? '');
+
+    $stan = meeting_state($meeting);
+    if (!$stan['can_join']) {
+        throw new ApiError($stan['join_hint']);
+    }
+
+    sprzataj_pokoje();
+
+    /* Ta sama karta wchodząca ponownie (odświeżenie strony) nadpisuje
+       swój poprzedni wpis, zamiast dokładać drugiego uczestnika. */
+    db()->prepare('DELETE FROM meeting_presence WHERE peer_id = ?')->execute([$peerId]);
+    db()->prepare(
+        /* Wchodzimy z mikrofonem, bez kamery — przeglądarka i tak przyśle
+           swój stan przy pierwszym odpytaniu, ale lista obecnych ma być
+           prawdziwa od pierwszej chwili. */
+        'INSERT INTO meeting_presence (meeting_id, peer_id, user_id, mic, cam, sharing, joined_at, seen_at)
+         VALUES (?, ?, ?, 1, 0, 0, ?, ?)'
+    )->execute([$meeting['id'], $peerId, $me['id'], now(), now()]);
+
+    /* Pierwsze wejście uruchamia spotkanie — status „w trakcie” bierze się
+       stąd, a nie z samego zegara. */
+    if ($meeting['started_at'] === null) {
+        db()->prepare('UPDATE meetings SET started_at = ? WHERE id = ?')->execute([now(), $meeting['id']]);
+        log_activity($me['id'], 'meeting.join', 'Rozpoczął spotkanie „' . $meeting['title'] . '”');
+    }
+
+    $swieze = meeting_or_fail((int)$meeting['id']);
+
+    return [
+        'ok'          => true,
+        'meeting'     => map_meeting($swieze),
+        'note'        => meeting_note((int)$meeting['id']),
+        'peers'       => meeting_peers((int)$meeting['id'], $peerId),
+        'ice_servers' => ice_servers(),
+        'has_turn'    => count(TURN_SERVERS) > 0,
+        'cursor'      => (int)db()->query('SELECT COALESCE(MAX(id), 0) FROM meeting_signals')->fetchColumn(),
+        'meetings'    => meetings_all(),
+    ];
+}
+
+/** Wyjście z pokoju. Pozostali zauważą to przy najbliższym odpytaniu. */
+function action_meeting_leave(array $me): array
+{
+    $peerId = clean_peer_id(body()['peer_id'] ?? '');
+
+    $wpis = db()->prepare('SELECT meeting_id FROM meeting_presence WHERE peer_id = ?');
+    $wpis->execute([$peerId]);
+    $meetingId = (int)$wpis->fetchColumn();
+
+    db()->prepare('DELETE FROM meeting_presence WHERE peer_id = ?')->execute([$peerId]);
+    db()->prepare('DELETE FROM meeting_signals WHERE from_peer = ? OR to_peer = ?')->execute([$peerId, $peerId]);
+
+    /* Gdy wychodzi ostatnia osoba, spotkanie samo się domyka — ale tylko
+       takie, które faktycznie się zaczęło. Ktoś, kto zajrzał do pokoju
+       kwadrans przed czasem i wyszedł, nie kończy spotkania, które ma się
+       dopiero odbyć. */
+    if ($meetingId > 0) {
+        $zostali = db()->prepare('SELECT COUNT(*) FROM meeting_presence WHERE meeting_id = ?');
+        $zostali->execute([$meetingId]);
+
+        if ((int)$zostali->fetchColumn() === 0) {
+            $meeting = meeting_or_fail($meetingId);
+            $zaczete = $meeting['started_at'] !== null && time() >= (int)strtotime($meeting['starts_at']);
+
+            if ($meeting['status'] === 'scheduled' && $zaczete) {
+                db()->prepare('UPDATE meetings SET status = \'ended\', ended_at = ?, updated_by = ?, updated_at = ? WHERE id = ?')
+                    ->execute([now(), $me['id'], now(), $meetingId]);
+                log_activity($me['id'], 'meeting.end', 'Zakończył spotkanie „' . $meeting['title'] . '”');
+            }
+        }
+    }
+
+    return ['ok' => true, 'meetings' => meetings_all()];
+}
+
+/**
+ * Jedno odpytanie robi trzy rzeczy naraz: podtrzymuje obecność, zwraca
+ * listę osób w pokoju i odbiera zaadresowane do nas wiadomości WebRTC.
+ * Dzięki temu pokój na czteroosobowy zespół kosztuje jedno żądanie na
+ * sekundę na osobę, a po zestawieniu połączeń jeszcze mniej.
+ */
+function action_rtc_poll(array $me): array
+{
+    $peerId = clean_peer_id(body()['peer_id'] ?? '');
+    $since  = max(0, (int)(body()['since'] ?? 0));
+
+    $wpis = db()->prepare('SELECT * FROM meeting_presence WHERE peer_id = ? AND user_id = ?');
+    $wpis->execute([$peerId, $me['id']]);
+    $obecnosc = $wpis->fetch();
+
+    if (!$obecnosc) {
+        /* Wypadliśmy z pokoju — przeglądarka ma się przyłączyć od nowa. */
+        return ['ok' => true, 'rejoin' => true];
+    }
+
+    $meetingId = (int)$obecnosc['meeting_id'];
+
+    /* Stan mikrofonu i kamery jedzie razem z odpytaniem, żeby nie mnożyć żądań.
+       Bierzemy pod uwagę tylko te pola, które faktycznie przyszły: odpytanie
+       bez nich (na przykład ponowione po błędzie sieci) nie może po cichu
+       wyciszyć komuś mikrofonu. Nazwy kolumn pochodzą z zamkniętej listy,
+       więc doklejenie ich do zapytania jest bezpieczne. */
+    $body  = body();
+    $ustaw = ['seen_at = ?'];
+    $dane  = [now()];
+
+    foreach (['mic', 'cam', 'sharing'] as $pole) {
+        if (array_key_exists($pole, $body)) {
+            $ustaw[] = $pole . ' = ?';
+            $dane[]  = !empty($body[$pole]) ? 1 : 0;
+        }
+    }
+    $dane[] = $peerId;
+
+    db()->prepare('UPDATE meeting_presence SET ' . implode(', ', $ustaw) . ' WHERE peer_id = ?')
+        ->execute($dane);
+
+    sprzataj_pokoje();
+
+    $skrzynka = db()->prepare(
+        'SELECT id, from_peer, kind, payload FROM meeting_signals
+          WHERE to_peer = ? AND id > ? ORDER BY id LIMIT 60'
+    );
+    $skrzynka->execute([$peerId, $since]);
+    $wiadomosci = $skrzynka->fetchAll();
+
+    $kursor = $since;
+    $out    = [];
+    foreach ($wiadomosci as $w) {
+        $kursor = max($kursor, (int)$w['id']);
+        $out[]  = [
+            'from'    => $w['from_peer'],
+            'kind'    => $w['kind'],
+            'payload' => json_decode($w['payload'], true),
+        ];
+    }
+
+    $meeting = meeting_or_fail($meetingId);
+
+    return [
+        'ok'      => true,
+        'peers'   => meeting_peers($meetingId, $peerId),
+        'signals' => $out,
+        'cursor'  => $kursor,
+        'closed'  => in_array($meeting['status'], ['ended', 'cancelled'], true),
+    ];
+}
+
+/** Odkłada wiadomość WebRTC do skrzynki drugiej strony. */
+function action_rtc_signal(array $me): array
+{
+    $body   = body();
+    $peerId = clean_peer_id($body['peer_id'] ?? '');
+    $doKogo = clean_peer_id($body['to'] ?? '');
+    $rodzaj = (string)($body['kind'] ?? '');
+
+    if (!in_array($rodzaj, ['offer', 'answer', 'ice'], true)) {
+        throw new ApiError('Nieznany rodzaj wiadomości sygnalizacyjnej.');
+    }
+
+    $wpis = db()->prepare('SELECT meeting_id FROM meeting_presence WHERE peer_id = ? AND user_id = ?');
+    $wpis->execute([$peerId, $me['id']]);
+    $meetingId = (int)$wpis->fetchColumn();
+
+    if ($meetingId === 0) {
+        throw new ApiError('Nie jesteś w tym pokoju.', 403);
+    }
+
+    /* Wiadomość wolno wysłać wyłącznie do kogoś, kto siedzi w tym samym
+       pokoju — inaczej sesja w panelu pozwalałaby zaczepiać obce pokoje. */
+    $cel = db()->prepare('SELECT 1 FROM meeting_presence WHERE peer_id = ? AND meeting_id = ?');
+    $cel->execute([$doKogo, $meetingId]);
+    if (!$cel->fetchColumn()) {
+        throw new ApiError('Odbiorca nie jest już w pokoju.', 409);
+    }
+
+    $payload = json_encode($body['payload'] ?? null, JSON_UNESCAPED_UNICODE);
+    if ($payload === false || strlen($payload) > 200000) {
+        throw new ApiError('Wiadomość sygnalizacyjna jest nieprawidłowa.');
+    }
+
+    db()->prepare(
+        'INSERT INTO meeting_signals (meeting_id, from_peer, to_peer, kind, payload, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)'
+    )->execute([$meetingId, $peerId, $doKogo, $rodzaj, $payload, now()]);
+
+    return ['ok' => true];
+}
+
+/**
+ * Zapis notatki. Numer wersji rośnie z każdym zapisem — gdy przyjdzie
+ * zapis oparty o starszą wersję, znaczy to, że ktoś pisał równolegle.
+ * Wtedy nie nadpisujemy po cichu, tylko oddajemy obie wersje decyzji
+ * użytkownika (chyba że wprost prosi o nadpisanie).
+ */
+function action_meeting_note_save(array $me): array
+{
+    $meeting = meeting_or_fail((int)(body()['meeting_id'] ?? 0));
+    $tresc   = clean_text((string)(body()['content'] ?? ''));
+    $wersja  = (int)(body()['revision'] ?? 0);
+    $silowo  = !empty(body()['force']);
+
+    $obecna = meeting_note((int)$meeting['id']);
+
+    if (!$silowo && $wersja !== (int)$obecna['revision']) {
+        return [
+            'ok'       => true,
+            'saved'    => false,
+            'conflict' => true,
+            'note'     => $obecna,
+        ];
+    }
+
+    $nowaWersja = (int)$obecna['revision'] + 1;
+
+    /* Bez UPSERT-a: składnia ON CONFLICT wymaga SQLite 3.24+, a nie wiadomo,
+       co siedzi na hostingu. Reszta panelu zapisuje notatki tak samo. */
+    $istnieje = db()->prepare('SELECT 1 FROM meeting_notes WHERE meeting_id = ?');
+    $istnieje->execute([$meeting['id']]);
+
+    if ($istnieje->fetchColumn()) {
+        db()->prepare('UPDATE meeting_notes SET content = ?, revision = ?, updated_by = ?, updated_at = ? WHERE meeting_id = ?')
+            ->execute([$tresc, $nowaWersja, $me['id'], now(), $meeting['id']]);
+    } else {
+        db()->prepare('INSERT INTO meeting_notes (meeting_id, content, revision, updated_by, updated_at) VALUES (?, ?, ?, ?, ?)')
+            ->execute([$meeting['id'], $tresc, $nowaWersja, $me['id'], now()]);
+    }
+
+    return ['ok' => true, 'saved' => true, 'note' => meeting_note((int)$meeting['id'])];
+}
+
+/* ================================================================== *
+ *  SPOTKANIA — pomocnicze
+ * ================================================================== */
+
+/** Odczyt i walidacja formularza spotkania. */
+function meeting_input_or_fail(): array
+{
+    $body = body();
+
+    $title = clean_line((string)($body['title'] ?? ''), 120);
+    if ($title === '') {
+        throw new ApiError('Podaj temat spotkania.');
+    }
+
+    $data    = clean_date($body['date'] ?? null);
+    if ($data === null) {
+        throw new ApiError('Podaj datę spotkania.');
+    }
+    $godzina = clean_time($body['time'] ?? '');
+
+    $czas = (int)($body['duration_min'] ?? 30);
+    if ($czas < 5 || $czas > 480) {
+        throw new ApiError('Czas trwania musi mieścić się między 5 minutami a 8 godzinami.');
+    }
+
+    $folderId = isset($body['folder_id']) && $body['folder_id'] !== null && $body['folder_id'] !== ''
+        ? (int)$body['folder_id']
+        : null;
+    if ($folderId !== null) {
+        folder_or_fail($folderId);   // rzuci, jeśli folder zniknął
+    }
+
+    /* Adresy spoza zespołu zapisujemy jako listę zaproszonych. Panel nie
+       wysyła poczty, więc link trzeba przekazać ręcznie — mówi o tym
+       podpowiedź przy formularzu. */
+    $maile = [];
+    foreach ((array)($body['emails'] ?? []) as $adres) {
+        $adres = mb_strtolower(clean_line((string)$adres, 190));
+        if ($adres === '') {
+            continue;
+        }
+        if (!filter_var($adres, FILTER_VALIDATE_EMAIL)) {
+            throw new ApiError('To nie wygląda na adres e-mail: ' . $adres);
+        }
+        if (!in_array($adres, $maile, true)) {
+            $maile[] = $adres;
+        }
+    }
+    if (count($maile) > 20) {
+        throw new ApiError('Maksymalnie 20 adresów e-mail na spotkanie.');
+    }
+
+    return [
+        'title'        => $title,
+        'description'  => clean_text((string)($body['description'] ?? ''), 4000),
+        'folder_id'    => $folderId,
+        'starts_at'    => $data . ' ' . $godzina . ':00',
+        'duration_min' => $czas,
+        'user_ids'     => valid_user_ids($body['user_ids'] ?? []),
+        'emails'       => $maile,
+    ];
+}
+
+/** Ustawia listę uczestników; twórca spotkania zawsze zostaje na liście. */
+function set_meeting_participants(int $meetingId, array $userIds, array $emails, int $ownerId): void
+{
+    db()->prepare('DELETE FROM meeting_participants WHERE meeting_id = ?')->execute([$meetingId]);
+
+    if (!in_array($ownerId, $userIds, true)) {
+        array_unshift($userIds, $ownerId);
+    }
+
+    $osoba = db()->prepare(
+        'INSERT INTO meeting_participants (meeting_id, user_id, role, invited_at) VALUES (?, ?, ?, ?)'
+    );
+    foreach ($userIds as $userId) {
+        $osoba->execute([$meetingId, $userId, $userId === $ownerId ? 'host' : 'guest', now()]);
+    }
+
+    $mail = db()->prepare(
+        'INSERT INTO meeting_participants (meeting_id, email, role, invited_at) VALUES (?, ?, \'guest\', ?)'
+    );
+    foreach ($emails as $adres) {
+        $mail->execute([$meetingId, $adres, now()]);
+    }
+}
+
+/** Zapytanie bazowe: spotkanie razem z nazwą folderu i danymi autora. */
+function meeting_select(): string
+{
+    return 'SELECT m.*, f.name AS folder_name,
+                   cu.name AS created_by_name, cu.color AS created_by_color
+              FROM meetings m
+              LEFT JOIN folders f ON f.id = m.folder_id
+              LEFT JOIN users cu ON cu.id = m.created_by';
+}
+
+function meeting_or_fail(int $id): array
+{
+    $stmt = db()->prepare(meeting_select() . ' WHERE m.id = ?');
+    $stmt->execute([$id]);
+    $meeting = $stmt->fetch();
+
+    if (!$meeting) {
+        throw new ApiError('Nie ma takiego spotkania.', 404);
+    }
+    return $meeting;
+}
+
+/** Spotkanie po identyfikatorze liczbowym albo po identyfikatorze pokoju. */
+function meeting_or_fail_by_any($id, $room): array
+{
+    if ($id !== null && $id !== '' && (int)$id > 0) {
+        return meeting_or_fail((int)$id);
+    }
+
+    $room = clean_line((string)$room, 40);
+    if ($room === '') {
+        throw new ApiError('Podaj, o które spotkanie chodzi.');
+    }
+
+    $stmt = db()->prepare(meeting_select() . ' WHERE m.room_id = ?');
+    $stmt->execute([$room]);
+    $meeting = $stmt->fetch();
+
+    if (!$meeting) {
+        throw new ApiError('Nie ma pokoju o takim adresie.', 404);
+    }
+    return $meeting;
+}
+
+/** Zmieniać i kasować spotkanie może ten, kto je umówił. */
+function meeting_owner_or_fail(array $meeting, array $me): void
+{
+    if ((int)$meeting['created_by'] !== (int)$me['id']) {
+        throw new ApiError('Spotkaniem zarządza osoba, która je umówiła.', 403);
+    }
+}
+
+/** Identyfikator karty przeglądarki — losowy ciąg wygenerowany po stronie klienta. */
+function clean_peer_id($value): string
+{
+    $value = trim((string)$value);
+    if (!preg_match('/^[a-z0-9]{8,40}$/', $value)) {
+        throw new ApiError('Nieprawidłowy identyfikator uczestnika.');
+    }
+    return $value;
+}
+
+/**
+ * Wyrzuca z pokoi osoby, które przestały się odzywać (zamknięta karta,
+ * zerwany internet), i kasuje przeterminowane wiadomości sygnalizacyjne.
+ * Wiadomości żyją minutę: dłużej i tak są bezużyteczne, bo dotyczą
+ * połączenia, które w tym czasie zdążyło się już zestawić albo zerwać.
+ */
+function sprzataj_pokoje(): void
+{
+    $prog = date('Y-m-d H:i:s', time() - MEETING_PEER_TIMEOUT);
+    db()->prepare('DELETE FROM meeting_presence WHERE seen_at < ?')->execute([$prog]);
+
+    $stare = date('Y-m-d H:i:s', time() - 60);
+    db()->prepare('DELETE FROM meeting_signals WHERE created_at < ?')->execute([$stare]);
+}
+
+/** Osoby obecne w pokoju; „ja” dostaje znacznik, żeby klient się nie mnożył. */
+function meeting_peers(int $meetingId, string $peerId): array
+{
+    $stmt = db()->prepare(
+        'SELECT p.peer_id, p.user_id, p.mic, p.cam, p.sharing, p.joined_at,
+                u.name, u.color
+           FROM meeting_presence p
+           JOIN users u ON u.id = p.user_id
+          WHERE p.meeting_id = ?
+          ORDER BY p.joined_at, p.id'
+    );
+    $stmt->execute([$meetingId]);
+
+    $out = [];
+    foreach ($stmt->fetchAll() as $row) {
+        $out[] = [
+            'peer_id' => $row['peer_id'],
+            'user_id' => (int)$row['user_id'],
+            'name'    => $row['name'],
+            'color'   => $row['color'],
+            'mic'     => (int)$row['mic'] === 1,
+            'cam'     => (int)$row['cam'] === 1,
+            'sharing' => (int)$row['sharing'] === 1,
+            'me'      => $row['peer_id'] === $peerId,
+        ];
+    }
+    return $out;
+}
+
+function meeting_note(int $meetingId): array
+{
+    $stmt = db()->prepare(
+        'SELECT n.content, n.revision, n.updated_at, u.name AS updated_by_name
+           FROM meeting_notes n
+           LEFT JOIN users u ON u.id = n.updated_by
+          WHERE n.meeting_id = ?'
+    );
+    $stmt->execute([$meetingId]);
+    $row = $stmt->fetch();
+
+    return [
+        'content'         => $row['content'] ?? '',
+        'revision'        => (int)($row['revision'] ?? 0),
+        'updated_by_name' => $row['updated_by_name'] ?? null,
+        'updated_at'      => iso($row['updated_at'] ?? null),
+    ];
+}
+
+/** Wszystkie spotkania z uczestnikami i stanem — jednym kompletem zapytań. */
+function meetings_all(): array
+{
+    sprzataj_pokoje();
+
+    $rows = db()->query(meeting_select() . ' ORDER BY m.starts_at DESC, m.id DESC')->fetchAll();
+
+    if (!$rows) {
+        return [];
+    }
+
+    $ids = [];
+    foreach ($rows as $row) {
+        $ids[] = (int)$row['id'];
+    }
+    $miejsca = implode(',', array_fill(0, count($ids), '?'));
+
+    /* Uczestnicy wszystkich spotkań naraz — bez zapytania na wiersz. */
+    $stmt = db()->prepare(
+        'SELECT mp.meeting_id, mp.user_id, mp.email, mp.role, u.name, u.color
+           FROM meeting_participants mp
+           LEFT JOIN users u ON u.id = mp.user_id
+          WHERE mp.meeting_id IN (' . $miejsca . ')
+          ORDER BY mp.role DESC, mp.id'
+    );
+    $stmt->execute($ids);
+
+    $uczestnicy = [];
+    foreach ($stmt->fetchAll() as $row) {
+        $uczestnicy[(int)$row['meeting_id']][] = [
+            'user_id' => $row['user_id'] !== null ? (int)$row['user_id'] : null,
+            'email'   => $row['email'],
+            'name'    => $row['name'] ?? $row['email'],
+            'color'   => $row['color'],
+            'role'    => $row['role'],
+        ];
+    }
+
+    $stmt = db()->prepare(
+        'SELECT meeting_id, COUNT(*) AS ile FROM meeting_presence
+          WHERE meeting_id IN (' . $miejsca . ') GROUP BY meeting_id'
+    );
+    $stmt->execute($ids);
+    $wPokoju = [];
+    foreach ($stmt->fetchAll() as $row) {
+        $wPokoju[(int)$row['meeting_id']] = (int)$row['ile'];
+    }
+
+    $stmt = db()->prepare(
+        'SELECT meeting_id, LENGTH(content) AS dlugosc, updated_at FROM meeting_notes
+          WHERE meeting_id IN (' . $miejsca . ')'
+    );
+    $stmt->execute($ids);
+    $notatki = [];
+    foreach ($stmt->fetchAll() as $row) {
+        $notatki[(int)$row['meeting_id']] = [
+            'has_note'   => (int)$row['dlugosc'] > 0,
+            'updated_at' => iso($row['updated_at']),
+        ];
+    }
+
+    $out = [];
+    foreach ($rows as $row) {
+        $id = (int)$row['id'];
+        $out[] = map_meeting($row, $uczestnicy[$id] ?? [], $wPokoju[$id] ?? 0, $notatki[$id] ?? null);
+    }
+    return $out;
+}
+
+/** Wiersz spotkania => kształt oczekiwany przez interfejs. */
+function map_meeting(array $row, ?array $uczestnicy = null, ?int $wPokoju = null, ?array $notatka = null): array
+{
+    $id = (int)$row['id'];
+
+    if ($uczestnicy === null) {
+        $stmt = db()->prepare(
+            'SELECT mp.user_id, mp.email, mp.role, u.name, u.color
+               FROM meeting_participants mp
+               LEFT JOIN users u ON u.id = mp.user_id
+              WHERE mp.meeting_id = ? ORDER BY mp.role DESC, mp.id'
+        );
+        $stmt->execute([$id]);
+        $uczestnicy = [];
+        foreach ($stmt->fetchAll() as $u) {
+            $uczestnicy[] = [
+                'user_id' => $u['user_id'] !== null ? (int)$u['user_id'] : null,
+                'email'   => $u['email'],
+                'name'    => $u['name'] ?? $u['email'],
+                'color'   => $u['color'],
+                'role'    => $u['role'],
+            ];
+        }
+    }
+
+    if ($wPokoju === null) {
+        $stmt = db()->prepare('SELECT COUNT(*) FROM meeting_presence WHERE meeting_id = ?');
+        $stmt->execute([$id]);
+        $wPokoju = (int)$stmt->fetchColumn();
+    }
+
+    $stan = meeting_state($row, $wPokoju);
+
+    return [
+        'id'               => $id,
+        'room_id'          => $row['room_id'],
+        'title'            => $row['title'],
+        'description'      => $row['description'],
+        'folder_id'        => $row['folder_id'] !== null ? (int)$row['folder_id'] : null,
+        'folder_name'      => $row['folder_name'] ?? null,
+        'starts_at'        => iso($row['starts_at']),
+        'starts_at_local'  => $row['starts_at'],
+        'duration_min'     => (int)$row['duration_min'],
+        'status'           => $stan['status'],
+        'stored_status'    => $row['status'],
+        'can_join'         => $stan['can_join'],
+        'join_hint'        => $stan['join_hint'],
+        'in_room'          => $wPokoju,
+        'participants'     => $uczestnicy,
+        'has_note'         => $notatka['has_note'] ?? null,
+        'note_updated_at'  => $notatka['updated_at'] ?? null,
+        'created_by'       => (int)$row['created_by'],
+        'created_by_name'  => $row['created_by_name'] ?? null,
+        'created_by_color' => $row['created_by_color'] ?? null,
+        'started_at'       => iso($row['started_at']),
+        'ended_at'         => iso($row['ended_at']),
+    ];
+}
+
+/**
+ * Stan spotkania liczony na bieżąco. Baza pamięta tylko decyzje ludzi
+ * (odwołane, zakończone); reszta wynika z zegara i z tego, czy ktoś
+ * siedzi w pokoju. Dzięki temu status nie „zawiesza się” na nadchodzącym
+ * spotkaniu sprzed miesiąca, na które nikt nie przyszedł.
+ */
+function meeting_state(array $row, ?int $wPokoju = null): array
+{
+    if ($wPokoju === null) {
+        $stmt = db()->prepare('SELECT COUNT(*) FROM meeting_presence WHERE meeting_id = ?');
+        $stmt->execute([(int)$row['id']]);
+        $wPokoju = (int)$stmt->fetchColumn();
+    }
+
+    $teraz  = time();
+    $start  = (int)strtotime($row['starts_at']);
+    $koniec = $start + ((int)$row['duration_min'] * 60);
+
+    $otwarcie   = $start - MEETING_JOIN_EARLY_MIN * 60;
+    $zamkniecie = $koniec + MEETING_JOIN_LATE_MIN * 60;
+
+    if ($row['status'] === 'cancelled') {
+        return ['status' => 'cancelled', 'can_join' => false, 'join_hint' => 'Spotkanie zostało odwołane.'];
+    }
+
+    if ($row['status'] === 'ended') {
+        return ['status' => 'ended', 'can_join' => false, 'join_hint' => 'Spotkanie jest już zakończone.'];
+    }
+
+    if ($wPokoju > 0) {
+        return ['status' => 'live', 'can_join' => true, 'join_hint' => ''];
+    }
+
+    if ($teraz > $zamkniecie) {
+        return ['status' => 'ended', 'can_join' => false, 'join_hint' => 'Termin tego spotkania dawno minął.'];
+    }
+
+    if ($teraz < $otwarcie) {
+        $status = 'scheduled';
+        $hint   = 'Pokój otwiera się ' . MEETING_JOIN_EARLY_MIN . ' minut przed startem.';
+        return ['status' => $status, 'can_join' => false, 'join_hint' => $hint];
+    }
+
+    return [
+        'status'    => $teraz >= $start ? 'open' : 'soon',
+        'can_join'  => true,
+        'join_hint' => '',
+    ];
 }
 
 /* ================================================================== *
