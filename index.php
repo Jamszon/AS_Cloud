@@ -2001,10 +2001,40 @@ function render_setup_error(string $message): void
             </button>
         </header>
 
+        <!-- Zasady autoodtwarzania potrafią wstrzymać dźwięk, dopóki ktoś
+             nie kliknie na stronie. Zamiast ciszy bez wyjaśnienia dajemy
+             przycisk, który wznawia odtwarzanie już w obsłudze kliknięcia. -->
+        <div x-show="room.dzwiekZablokowany" x-cloak
+             class="flex shrink-0 items-center gap-3 border-b border-amber-800 bg-amber-950 px-4 py-2 text-[11px] text-amber-200">
+            <span class="flex-1">Przeglądarka wstrzymała dźwięk do czasu kliknięcia na stronie.</span>
+            <button @click="odblokujDzwiek()"
+                    class="shrink-0 rounded-lg bg-amber-600 px-3 py-1.5 text-[11px] font-semibold text-white transition hover:bg-amber-700">
+                Włącz dźwięk
+            </button>
+        </div>
+
         <!-- Ostrzeżenia infrastrukturalne — zanim ktoś zacznie szukać winy w sobie. -->
         <div x-show="room.ostrzezenie" x-cloak
              class="shrink-0 border-b border-amber-800 bg-amber-950 px-4 py-2 text-[11px] leading-relaxed text-amber-200">
             <span x-text="room.ostrzezenie"></span>
+        </div>
+
+        <!--
+             Dźwięk rozmówców ma własne odtwarzacze, całkiem oddzielone od
+             kafelków wideo. Wcześniej audio jechało w tym samym elemencie
+             <video> co obraz — a ten jest ukrywany, gdy rozmówca nie ma
+             włączonej kamery. Ukryty element wideo nigdy nie zaczyna
+             dekodować (readyState zostaje na 0), więc rozmowa była niema
+             do chwili, aż ktokolwiek włączył kamerę albo udostępnił ekran.
+
+             Elementy są przezroczyste i wielkości piksela, ale świadomie
+             NIE ukryte przez display:none — to właśnie ukrycie było
+             przyczyną problemu.
+        -->
+        <div class="pointer-events-none absolute bottom-0 left-0 h-px w-px overflow-hidden opacity-0" aria-hidden="true">
+            <template x-for="p in room.peers.filter(x => !x.me)" :key="'dzwiek-' + p.peer_id">
+                <audio x-effect="room.strumienTik; podepnijDzwiek($el, p.peer_id)" autoplay playsinline></audio>
+            </template>
         </div>
 
         <div class="flex min-h-0 flex-1 flex-col lg:flex-row">
@@ -2535,7 +2565,7 @@ function render_setup_error(string $message): void
                 open: false, meetingId: null, roomId: '', title: '',
                 peerId: '', cursor: 0, peers: [],
                 mic: true, cam: false, sharing: false, mozeUdostepniac: false,
-                kameraCzeka: false, mikrofonCzeka: false,
+                kameraCzeka: false, mikrofonCzeka: false, dzwiekZablokowany: false,
                 polaczenie: 'laczenie', statusTekst: 'Łączenie…', ostrzezenie: '',
                 czas: '', listaOpen: false, notatkiOpen: false,
                 strumienTik: 0, hasTurn: false, start: 0
@@ -3548,6 +3578,7 @@ function render_setup_error(string $message): void
                 this.room.sharing = false;
                 this.room.kameraCzeka = false;
                 this.room.mikrofonCzeka = false;
+                this.room.dzwiekZablokowany = false;
                 this.room.ostrzezenie = '';
                 this.room.polaczenie = 'laczenie';
                 this.room.statusTekst = 'Pytam o mikrofon…';
@@ -4138,17 +4169,58 @@ function render_setup_error(string $message): void
 
             /* ---------------------- podpięcie obrazu ---------------------- */
 
+            /**
+             * Kafelek pokazuje wyłącznie obraz. Dźwięk jest tu zawsze wyciszony,
+             * bo odtwarzają go osobne elementy <audio> — inaczej po włączeniu
+             * kamery ten sam głos leciałby dwoma drogami naraz.
+             */
             podepnijWideo(el, peerId) {
                 const swoj = peerId === this.room.peerId;
-
-                /* Własnego głosu nie odtwarzamy — natychmiastowe sprzężenie. */
-                el.muted = swoj;
+                el.muted = true;
 
                 const strumien = swoj ? (MEDIA.ekran || MEDIA.kamera) : MEDIA.zdalne.get(peerId);
                 if (el.srcObject !== strumien) {
                     el.srcObject = strumien || null;
                     if (strumien) el.play().catch(() => {});
                 }
+            },
+
+            /**
+             * Odtwarzacz głosu jednego rozmówcy. Istnieje przez cały czas
+             * trwania rozmowy, niezależnie od tego, czy ktokolwiek ma
+             * włączoną kamerę — dźwięk nie może zależeć od tego, czy widać
+             * obraz.
+             */
+            podepnijDzwiek(el, peerId) {
+                const strumien = MEDIA.zdalne.get(peerId);
+
+                if (el.srcObject !== strumien) {
+                    el.srcObject = strumien || null;
+                }
+                if (!strumien) return;
+
+                el.muted = false;
+                el.volume = 1;
+
+                const proba = el.play();
+                if (proba && proba.catch) {
+                    proba
+                        .then(() => { this.room.dzwiekZablokowany = false; })
+                        .catch(() => { this.room.dzwiekZablokowany = true; });
+                }
+            },
+
+            /** Wznowienie wstrzymanego dźwięku — musi iść z obsługi kliknięcia. */
+            odblokujDzwiek() {
+                const odtwarzacze = document.querySelectorAll('#panel audio');
+                let udalo = true;
+
+                for (const el of odtwarzacze) {
+                    el.muted = false;
+                    const proba = el.play();
+                    if (proba && proba.catch) proba.catch(() => { udalo = false; });
+                }
+                this.room.dzwiekZablokowany = !udalo ? true : false;
             },
 
             stanPolaczeniaTekst(stan) {

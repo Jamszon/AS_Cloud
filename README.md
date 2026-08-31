@@ -557,6 +557,14 @@ Dzięki temu włączenie kamery w trakcie rozmowy jest samą podmianą ścieżki
 o odpytywanie byłaby ona wolna i zawodna. Gdyby tory zakładały obie strony
 niezależnie, każda nadawałaby na torze, którego druga w ogóle nie czyta.
 
+**Dźwięk rozmówców ma własne elementy `<audio>`, oddzielone od kafelków.**
+To nie jest ozdoba: kafelek `<video>` jest ukrywany, gdy rozmówca nie ma
+włączonej kamery, a ukryty element wideo nigdy nie zaczyna dekodować
+(`readyState` zostaje na zerze). Gdy audio jechało tym samym elementem co
+obraz, rozmowa była niema do chwili, aż ktokolwiek włączył kamerę albo
+udostępnił ekran. Kafelki wideo są dlatego zawsze wyciszone — inaczej po
+włączeniu kamery ten sam głos leciałby dwoma drogami naraz.
+
 Obiekty WebRTC (`MediaStream`, `RTCPeerConnection`, `AudioContext`) żyją
 w `index.php` poza stanem Alpine, w stałej `MEDIA`. Alpine opakowuje dane
 w `Proxy`, a przypisanie opakowanego strumienia do elementu `<video>` po
